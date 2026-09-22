@@ -1,0 +1,102 @@
+/* ==========================================================================
+   Citadel design tokens — obsidian & amethyst HUD
+   Palette: black / purple / silver. Restraint rule: glow is reserved for
+   focus, active state and live status; everything else is flat + hairline.
+   ========================================================================== */
+
+@font-face { font-family: "Chakra Petch"; font-weight: 400; font-display: swap; src: url("../fonts/ChakraPetch-400.woff2") format("woff2"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 500; font-display: swap; src: url("../fonts/ChakraPetch-500.woff2") format("woff2"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 600; font-display: swap; src: url("../fonts/ChakraPetch-600.woff2") format("woff2"); }
+@font-face { font-family: "Chakra Petch"; font-weight: 700; font-display: swap; src: url("../fonts/ChakraPetch-700.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url("../fonts/JetBrainsMono-Regular.ttf") format("truetype"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 700; font-display: swap; src: url("../fonts/JetBrainsMono-Bold.ttf") format("truetype"); }
+
+:root {
+  /* surfaces (near-black, faintly violet) */
+  --bg:         #07060a;
+  --bg-2:       #0b0910;
+  --surface:    #0e0b14;
+  --surface-2:  #151021;
+  --surface-3:  #1c1530;
+
+  /* amethyst */
+  --accent:      #8b5cf6;
+  --accent-hi:   #a855f7;
+  --accent-soft: #c4b5fd;   /* text-safe violet on dark */
+  --accent-deep: #4c1d95;
+  --accent-wash: rgba(139, 92, 246, 0.10);
+
+  /* silver */
+  --silver-hi:   #e6e9ee;
+  --silver:      #c9ced6;
+  --silver-mute: #9aa1ad;
+  --silver-dim:  #6b7280;
+
+  /* lines */
+  --edge:        rgba(201, 206, 214, 0.13);
+  --edge-strong: rgba(168, 85, 247, 0.45);
+
+  /* status — used only for dots and small chips */
+  --ok:   #34d399;
+  --warn: #f5b454;
+  --bad:  #f43f5e;
+
+  /* type */
+  --font-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* geometry */
+  --chamfer: 14px;
+  --gap: 16px;
+  --radius-sm: 2px;
+
+  /* motion */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--silver);
+  background:
+    radial-gradient(1100px 600px at 12% -10%, rgba(139, 92, 246, 0.13), transparent 60%),
+    radial-gradient(900px 500px at 105% 105%, rgba(76, 29, 149, 0.20), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* scanline + vignette overlay: ~2% — felt more than seen */
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background:
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.017) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; }
+
+:focus-visible {
+  outline: 1px solid var(--accent-hi);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.18);
+}
+
+::selection { background: var(--accent-deep); color: var(--silver-hi); }
+
+/* thin, quiet scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

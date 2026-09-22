@@ -1,0 +1,15 @@
+[Unit]
+Description=Citadel LAN dashboard
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/.venv/bin/python -m app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+# Projects the dashboard starts are separate transient units (hub-proj-*), so restarting this service
+# never stops them.
+
+[Install]
+WantedBy=default.target

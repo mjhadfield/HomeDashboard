@@ -1,0 +1,280 @@
+/* ==========================================================================
+   Citadel skin for Jellyfin — obsidian & amethyst HUD, matched to the
+   dashboard's tokens.css. Paste into Jellyfin's
+   Dashboard (admin) -> General -> Custom CSS code -> Save.
+   Built against this server's actual compiled CSS (Jellyfin 10.11.11,
+   classic card/list home-screen markup) on 2026-09-22 — if the server
+   updates and things stop matching, re-check the selectors below rather
+   than assuming the whole thing is broken.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+  --cit-bg:          #07060a;
+  --cit-surface:     #0e0b14;
+  --cit-surface-2:   #151021;
+  --cit-surface-3:   #1c1530;
+  --cit-accent:      #8b5cf6;
+  --cit-accent-hi:   #a855f7;
+  --cit-accent-soft: #c4b5fd;
+  --cit-accent-deep: #4c1d95;
+  --cit-accent-wash: rgba(139, 92, 246, .10);
+  --cit-silver-hi:   #e6e9ee;
+  --cit-silver:      #c9ced6;
+  --cit-silver-mute: #9aa1ad;
+  --cit-silver-dim:  #6b7280;
+  --cit-edge:        rgba(201, 206, 214, .13);
+  --cit-edge-strong: rgba(168, 85, 247, .45);
+  --cit-font-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --cit-font-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+/* ---- base ------------------------------------------------------------ */
+html, body {
+  background:
+    radial-gradient(1100px 600px at 12% -10%, rgba(139, 92, 246, .13), transparent 60%),
+    radial-gradient(900px 500px at 105% 105%, rgba(76, 29, 149, .20), transparent 60%),
+    var(--cit-bg) !important;
+}
+body {
+  color: var(--cit-silver) !important;
+  font-family: var(--cit-font-display) !important;
+}
+* { scrollbar-width: thin; scrollbar-color: var(--cit-surface-3) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--cit-surface-3); border-radius: 8px; }
+::selection { background: var(--cit-accent-deep); color: var(--cit-silver-hi); }
+
+/* ---- header / nav rail ------------------------------------------------ */
+.skinHeader {
+  background: rgba(7, 6, 10, .88) !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--cit-edge) !important;
+}
+.headerTop { background: transparent !important; }
+.mainDrawer {
+  background: var(--cit-surface) !important;
+  border-right: 1px solid var(--cit-edge) !important;
+}
+.navMenuOptionText { font-family: var(--cit-font-display) !important; }
+.navMenuOption:hover .navMenuOptionIcon,
+.navMenuOption:hover .navMenuOptionText { color: var(--cit-accent-hi) !important; }
+
+/* ---- section titles ---------------------------------------------------- */
+.sectionTitle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: .6em;
+  font-family: var(--cit-font-display) !important;
+  font-weight: 600 !important;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-size: .95em;
+  color: var(--cit-silver-hi) !important;
+}
+.sectionTitle::before {
+  content: "";
+  display: inline-block;
+  flex: none;
+  width: 3px;
+  height: 1em;
+  background: linear-gradient(var(--cit-accent-hi), var(--cit-accent-deep));
+}
+.sectionTitleContainer { margin: 2em 0 1em !important; }
+
+/* ---- cards -------------------------------------------------------------- */
+.cardBox:not(.visualCardBox) .cardPadder,
+.cardImageContainer,
+.cardContent,
+.visualCardBox {
+  border-radius: 0 !important;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+}
+.cardImageContainer {
+  background-color: var(--cit-surface-2) !important;
+  border: 1px solid var(--cit-edge);
+  transition: border-color .25s ease, box-shadow .25s ease;
+}
+.cardBox {
+  margin: .8em !important;
+  transition: transform .25s cubic-bezier(.2, .7, .2, 1);
+}
+.card-hoverable:hover .cardBox { transform: translateY(-3px); }
+.card-hoverable:hover .cardImageContainer {
+  border-color: var(--cit-edge-strong) !important;
+  box-shadow: 0 0 22px rgba(139, 92, 246, .28);
+}
+.cardOverlayContainer { background: rgba(7, 6, 10, .6) !important; }
+.cardOverlayButtonIcon {
+  background-color: rgba(139, 92, 246, .85) !important;
+  color: #07060a !important;
+}
+.cardText {
+  color: var(--cit-silver) !important;
+  font-family: var(--cit-font-display) !important;
+}
+.cardText-secondary {
+  color: var(--cit-silver-dim) !important;
+  font-family: var(--cit-font-mono) !important;
+  font-size: .85em;
+}
+/* backdrop/hero-style cards (Continue Watching, Next Up): violet scrim
+   behind the title instead of flat black */
+.innerCardFooter {
+  background: linear-gradient(to top, rgba(7, 6, 10, .92), rgba(76, 29, 149, .35) 60%, transparent) !important;
+}
+
+/* ---- buttons / inputs / checkboxes -------------------------------------- */
+.emby-button {
+  font-family: var(--cit-font-display) !important;
+}
+.fab {
+  background: var(--cit-accent-deep) !important;
+  color: #fff !important;
+}
+.fab:hover { background: var(--cit-accent) !important; }
+.emby-input {
+  background: var(--cit-surface) !important;
+  border-bottom-color: var(--cit-edge) !important;
+  color: var(--cit-silver-hi) !important;
+  font-family: var(--cit-font-display) !important;
+}
+.emby-input:focus { border-color: var(--cit-accent-hi) !important; }
+.inputLabelFocused { color: var(--cit-accent-hi) !important; }
+.checkboxOutline { background: var(--cit-surface-2) !important; border-color: var(--cit-edge-strong) !important; }
+.emby-checkbox:checked + span + .checkboxOutline {
+  background: var(--cit-accent-deep) !important;
+  border-color: var(--cit-accent-hi) !important;
+}
+.emby-checkbox:checked + span + .checkboxOutline > .checkboxIcon-checked {
+  color: var(--cit-silver-hi) !important;
+}
+
+/* ---- indicators ---------------------------------------------------------- */
+.mediaSourceIndicator {
+  background: var(--cit-accent-deep) !important;
+  color: #fff !important;
+}
+
+/* ---- login page -----------------------------------------------------------
+   Set your welcome text in Dashboard -> General -> "Login disclaimer" —
+   it renders into .loginDisclaimer below the form, native to Jellyfin,
+   no file access needed. */
+#loginPage > div.margin-auto-y {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+/* CITADEL // Media Server — generated, no JS/file access needed */
+#loginPage > div.margin-auto-y::before {
+  order: 1;
+  content: "CITADEL";
+  display: block;
+  text-align: center;
+  font-family: var(--cit-font-display);
+  font-weight: 700;
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  font-size: 2.6em;
+  background: linear-gradient(180deg, #ffffff 0%, #c9ced6 45%, #7d8493 52%, #d6dae1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(139, 92, 246, .35));
+}
+#loginPage > div.margin-auto-y::after {
+  order: 2;
+  content: "// Media Server";
+  display: block;
+  text-align: center;
+  font-family: var(--cit-font-mono);
+  font-size: .85em;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--cit-accent-soft);
+  margin: .5em 0 2.2em;
+}
+.manualLoginForm {
+  order: 3;
+  box-sizing: border-box;
+  background: var(--cit-surface) !important;
+  border: 1px solid var(--cit-edge);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  padding: 3em 3em 2.6em !important;
+  width: 460px;
+  max-width: 90vw;
+  font-size: 1.1em;
+  box-shadow: 0 0 50px rgba(0, 0, 0, .55);
+}
+.manualLoginForm .sectionTitle { margin-bottom: .5em !important; font-size: 1.05em; }
+.manualLoginForm > div.flex:first-of-type {
+  flex-direction: column !important;
+  margin-bottom: 1.3em;
+}
+.manualLoginForm > div.flex:first-of-type::after {
+  content: 'Login as "Guest" with no password.';
+  display: block;
+  margin-top: .5em;
+  font-family: var(--cit-font-mono);
+  font-size: .72em;
+  letter-spacing: .03em;
+  text-transform: none;
+  color: var(--cit-silver-mute);
+}
+.manualLoginForm .inputContainer { margin-bottom: .3em; }
+.manualLoginForm .button-submit { padding-top: .9em !important; padding-bottom: .9em !important; }
+#loginPage .readOnlyContent { order: 4; width: 460px; max-width: 90vw; margin-top: 2.2em; }
+.button-submit {
+  background: var(--cit-accent-deep) !important;
+  color: #fff !important;
+}
+.button-submit:hover { background: var(--cit-accent) !important; }
+input[is="emby-checkbox"] { accent-color: var(--cit-accent-hi) !important; }
+.loginDisclaimerContainer {
+  margin-top: 1.4em !important;
+  padding-top: 1em;
+  border-top: 1px solid var(--cit-edge);
+}
+.loginDisclaimer {
+  font-family: var(--cit-font-mono) !important;
+  font-size: .8em;
+  color: var(--cit-accent-soft) !important;
+  text-align: center;
+  letter-spacing: .04em;
+}
+
+/* ---- mobile ----------------------------------------------------------- */
+@media (max-width: 600px) {
+  #loginPage > div.margin-auto-y::before {
+    font-size: 1.7em;
+    letter-spacing: .16em;
+  }
+  #loginPage > div.margin-auto-y::after {
+    font-size: .68em;
+    margin: .5em 0 1.6em;
+  }
+  .manualLoginForm {
+    width: 100%;
+    max-width: 92vw;
+    padding: 1.8em 1.5em 1.6em !important;
+    font-size: 1em;
+  }
+  .manualLoginForm .sectionTitle { font-size: 1em; }
+  #loginPage .readOnlyContent {
+    width: 100%;
+    max-width: 92vw;
+    margin-top: 1.6em;
+  }
+
+  .sectionTitleContainer { margin: 1.4em 0 .7em !important; }
+  .sectionTitle { font-size: .85em; letter-spacing: .06em; }
+  .cardBox { margin: .4em !important; }
+  .manualLoginForm .button-submit { padding-top: .8em !important; padding-bottom: .8em !important; }
+}

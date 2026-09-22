@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07060a">
+<title>Welcome</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/guest.css">
+</head>
+<body>
+<div class="sweep"></div>
+<main class="guest">
+  <div class="guest__wrap">
+    <div class="guest__logo"><svg class="i"><use href="#i-logo"/></svg></div>
+    <span class="wordmark">Citadel</span>
+    <p class="guest__hello">Welcome. Make yourself at home.</p>
+    <div id="doors"></div>
+    <div class="guest__status hud hud--plain" id="status"></div>
+    <div class="guest__foot">Guest access</div>
+  </div>
+</main>
+<script type="module" src="/static/js/icons.js"></script>
+<script type="module" src="/static/js/guest.js"></script>
+</body>
+</html>

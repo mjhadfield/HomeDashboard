@@ -1,0 +1,13 @@
+[Unit]
+Description=Citadel: publish @NAME@.local over mDNS
+After=avahi-daemon.service
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=@ROOT@/.venv/bin/python -m app.mdns @NAME@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

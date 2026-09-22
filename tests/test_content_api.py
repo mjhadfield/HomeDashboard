@@ -1,0 +1,156 @@
+"""Content API: curation, followed artists, booked gigs — and how gigs feed the alerts strip and the TV."""
+import json
+from datetime import datetime, timedelta
+
+import pytest
+
+from app import config, content, db
+from tests.test_content import make_music_db
+
+BASE = "/api/owner"
+
+
+@pytest.fixture(autouse=True)
+def _clean(client):
+    def wipe():
+        with db.db() as con:
+            for t in ("feed_items", "followed_artists", "gigs"):
+                con.execute(f"DELETE FROM {t}")
+            con.execute("DELETE FROM widget_settings WHERE widget IN ('radar', 'tv')")
+    wipe()
+    yield
+    wipe()
+
+
+def local_date(days=0):
+    return (datetime.now(config.TZ).date() + timedelta(days=days)).isoformat()
+
+
+GIG = {"artist": "Gojira", "venue": "O2 Academy", "city": "Leeds", "date": "2026-12-26", "doors": "18:30", "ticket_url": "https://tickets.example/1", "notes": "block B"}
+
+
+def test_guests_cannot_touch_any_content_route(guest_client):
+    h = {"X-Hub": "1"}
+    assert guest_client.get(f"{BASE}/artists").status_code == 403
+    assert guest_client.get(f"{BASE}/gigs").status_code == 403
+    for method, path, body in (("post", "/artists", {"name": "X"}), ("patch", "/artists/1", {"status": "mute"}), ("delete", "/artists/1", None),
+                               ("post", "/artists/resync", None), ("post", "/gigs", GIG), ("put", "/gigs/1", GIG), ("delete", "/gigs/1", None),
+                               ("post", "/items/1/status", {"status": "seen"}), ("post", "/items/mark-seen/news", None), ("post", "/items/1/read", None)):
+        r = getattr(guest_client, method)(BASE + path, headers=h, **({"json": body} if body is not None else {}))
+        assert r.status_code == 403, (method, path)
+
+
+def test_item_curation_endpoints(owner_client):
+    content.upsert_items("news", "f", [{"external_id": "1", "title": "A story", "date": "2026-09-20"}], baseline=False)
+    iid = content.list_items("news")["items"][0]["id"]
+    assert owner_client.post(f"{BASE}/items/{iid}/status", json={"status": "pinned"}).status_code == 200
+    assert content.list_items("news")["items"][0]["status"] == "pinned"
+    assert owner_client.post(f"{BASE}/items/{iid}/status", json={"status": "bogus"}).status_code == 422
+    assert owner_client.post(f"{BASE}/items/99999/status", json={"status": "seen"}).status_code == 404
+    content.upsert_items("news", "f", [{"external_id": "2", "title": "Another", "date": "2026-09-20"}], baseline=False)
+    assert owner_client.post(f"{BASE}/items/mark-seen/news").json()["cleared"] == 1
+    assert owner_client.post(f"{BASE}/items/mark-seen/bogus").status_code == 422
+    assert owner_client.post(f"{BASE}/items/{iid}/read").status_code == 200
+    reread = next(i for i in content.list_items("news")["items"] if i["id"] == iid)
+    assert reread["meta"].get("read") is True and reread["status"] == "pinned"              # reading doesn't disturb status
+    assert owner_client.post(f"{BASE}/items/99999/read").status_code == 404
+
+
+def test_followed_artists_lifecycle(owner_client):
+    r = owner_client.post(f"{BASE}/artists", json={"name": "  Gojira  "})
+    assert r.status_code == 201
+    aid = r.json()["id"]
+    assert owner_client.post(f"{BASE}/artists", json={"name": "gojira"}).status_code == 409           # names are unique, case-insensitively
+    assert owner_client.post(f"{BASE}/artists", json={"name": ""}).status_code == 422
+    listing = owner_client.get(f"{BASE}/artists").json()
+    assert [a["name"] for a in listing["artists"]] == ["Gojira"] and listing["music_db"] is False
+    assert owner_client.patch(f"{BASE}/artists/{aid}", json={"status": "mute"}).status_code == 200
+    assert owner_client.get(f"{BASE}/artists").json()["artists"][0]["status"] == "mute"
+    assert owner_client.patch(f"{BASE}/artists/{aid}", json={"status": "adore"}).status_code == 422
+    assert owner_client.patch(f"{BASE}/artists/99999", json={"status": "pin"}).status_code == 404
+    assert owner_client.delete(f"{BASE}/artists/{aid}").status_code == 200
+    assert owner_client.delete(f"{BASE}/artists/{aid}").status_code == 404
+
+
+def test_muting_an_artist_from_a_card(owner_client):
+    aid = owner_client.post(f"{BASE}/artists", json={"name": "Ghost"}).json()["id"]
+    content.upsert_items("release", "mb", [{"external_id": "1", "artist": "Ghost", "title": "T", "date": "2026-10-01"}], baseline=False)
+    assert owner_client.post(f"{BASE}/artists/mute", json={"name": "Ghost"}).status_code == 200
+    assert owner_client.get(f"{BASE}/artists").json()["artists"][0]["status"] == "mute"
+    assert owner_client.get(f"{BASE}/state").json()["widgets"]["releases"]["data"]["items"] == []      # hidden straight away
+    assert owner_client.post(f"{BASE}/artists/mute", json={"name": "Nobody"}).status_code == 404
+    assert owner_client.post(f"{BASE}/artists/mute", json={"name": "x"}, headers={"X-Hub": ""}).status_code == 403
+
+
+def test_resync_needs_music_companion_and_never_undoes_a_mute(owner_client, tmp_path, monkeypatch):
+    assert owner_client.post(f"{BASE}/artists/resync").status_code == 404                              # no database at the configured path
+    path = tmp_path / "music.sqlite"
+    make_music_db(path)
+    monkeypatch.setattr(config, "MUSIC_DB", path)
+    assert owner_client.post(f"{BASE}/artists/resync").json() == {"found": 4, "added": 4, "updated": 0}
+    ghost = next(a for a in owner_client.get(f"{BASE}/artists").json()["artists"] if a["name"] == "Ghost")
+    owner_client.patch(f"{BASE}/artists/{ghost['id']}", json={"status": "mute"})
+    assert owner_client.post(f"{BASE}/artists/resync").json()["added"] == 0
+    assert next(a for a in owner_client.get(f"{BASE}/artists").json()["artists"] if a["name"] == "Ghost")["status"] == "mute"
+
+
+def test_gig_crud_and_validation(owner_client):
+    gid = owner_client.post(f"{BASE}/gigs", json=GIG).json()["id"]
+    assert owner_client.get(f"{BASE}/gigs").json()["gigs"][0]["artist"] == "Gojira"
+    assert owner_client.put(f"{BASE}/gigs/{gid}", json={**GIG, "venue": "First Direct Arena", "ticket_url": None}).status_code == 200
+    got = owner_client.get(f"{BASE}/gigs").json()["gigs"][0]
+    assert got["venue"] == "First Direct Arena" and got["ticket_url"] is None
+    for bad in ({"date": "2026-13-40"}, {"date": "tomorrow"}, {"doors": "25:00"}, {"doors": "7pm"}, {"ticket_url": "ftp://x"}, {"ticket_url": "javascript:1"}, {"artist": ""}):
+        assert owner_client.post(f"{BASE}/gigs", json={**GIG, **bad}).status_code == 422, bad
+    assert owner_client.put("/api/owner/gigs/99999", json=GIG).status_code == 404
+    assert owner_client.delete(f"{BASE}/gigs/{gid}").status_code == 200
+    assert owner_client.delete(f"{BASE}/gigs/{gid}").status_code == 404
+
+
+def alerts(c):
+    return c.get(f"{BASE}/state").json()["alerts"]
+
+
+def test_a_gig_tomorrow_or_tonight_raises_a_reminder(owner_client):
+    assert not any(a["kind"] == "gig" for a in alerts(owner_client))
+    owner_client.post(f"{BASE}/gigs", json={**GIG, "date": local_date(3)})
+    assert not any(a["kind"] == "gig" for a in alerts(owner_client))                                 # 3 days out: no nag
+    with db.db() as con:
+        con.execute("DELETE FROM gigs")
+    owner_client.post(f"{BASE}/gigs", json={**GIG, "date": local_date(1)})
+    a = next(a for a in alerts(owner_client) if a["kind"] == "gig")
+    assert a["chip"] == "Tomorrow" and a["title"] == "Gojira" and "O2 Academy, Leeds" in a["detail"] and "doors 18:30" in a["detail"]
+    with db.db() as con:
+        con.execute("DELETE FROM gigs")
+    owner_client.post(f"{BASE}/gigs", json={**GIG, "date": local_date(0)})
+    a = next(a for a in alerts(owner_client) if a["kind"] == "gig")
+    assert a["chip"] == "Tonight" and a["title"] == "Gojira tonight" and a["level"] == "now"
+
+
+def test_tv_gets_gigs_only_when_that_panel_is_allowed(owner_client):
+    owner_client.post(f"{BASE}/gigs", json={**GIG, "date": local_date(1)})
+    put = lambda panels: owner_client.put(f"{BASE}/screens", json={"panels": panels, "rotate_seconds": 12, "show_alerts": True})
+    assert put(["bins"]).status_code == 200
+    s = owner_client.get("/api/kiosk/state").json()
+    assert "gigs" not in s["widgets"] and not any(a["kind"] == "gig" for a in s["alerts"])            # a booked gig is personal: opt-in
+    assert put(["bins", "gigs"]).status_code == 200
+    s = owner_client.get("/api/kiosk/state").json()
+    assert s["widgets"]["gigs"]["data"]["next"]["artist"] == "Gojira" and any(a["kind"] == "gig" for a in s["alerts"])
+    assert put(["podcasts"]).status_code == 422
+
+
+def test_every_content_widget_is_in_the_dashboard_state(owner_client):
+    w = owner_client.get(f"{BASE}/state").json()["widgets"]
+    assert {"gigs", "releases", "vinyl", "radar", "news"} <= set(w)
+    assert w["radar"]["configured"] is False and w["radar"]["data"] is None                          # no Ticketmaster key yet
+    assert w["releases"]["data"]["following"] == 0 and w["news"]["data"]["items"] == []
+
+
+def test_the_api_keys_are_write_only(owner_client):
+    key = "ABCDEF0123456789ABCDEF0123456789"
+    r = owner_client.put(f"{BASE}/widgets/radar/settings", json={"api_key": key, "latlong": "53.5,-2.2"})
+    assert r.status_code == 200 and key not in r.text and r.json()["has_api_key"] is True
+    assert key not in owner_client.get(f"{BASE}/config").text and key not in owner_client.get(f"{BASE}/state").text
+    assert owner_client.get(f"{BASE}/state").json()["widgets"]["radar"]["configured"] is True         # it's now considered set up
+    assert owner_client.put(f"{BASE}/widgets/radar/settings", json={"api_key": ""}).json()["has_api_key"] is True     # blank = keep
+    assert owner_client.put(f"{BASE}/widgets/radar/settings", json={"api_key": "short"}).status_code == 422

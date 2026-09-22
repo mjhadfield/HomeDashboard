@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07060a">
+<title>Welcome</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/guest.css">
+</head>
+<body>
+<div class="sweep"></div>
+<main class="guest">
+  <div class="guest__wrap">
+    <div class="guest__logo"><svg class="i"><use href="#i-logo"/></svg></div>
+    <span class="wordmark">Citadel</span>
+    <p class="guest__hello">Welcome. Make yourself at home.</p>
+
+    <a class="door cut" href="http://192.168.0.70:8096/web/#/home">
+      <svg class="i"><use href="#i-film"/></svg>
+      <span class="door__title">Jellyfin</span>
+      <span class="door__sub">Films · Shows · Music</span>
+    </a>
+
+    <div class="guest__status hud hud--plain"><span class="dot dot--ok"></span>Media server online</div>
+    <div class="guest__foot">Guest access</div>
+  </div>
+</main>
+
+<div class="mockbar"><span>mock · sample data</span><a href="index.html">Owner</a><a href="guest.html" aria-current="page">Guest</a><a href="tv.html">TV</a></div>
+<script type="module" src="../js/icons.js"></script>
+</body>
+</html>

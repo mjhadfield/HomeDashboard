@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07060a">
+<title>Citadel · TV</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/dashboard.css">
+<link rel="stylesheet" href="../css/tv.css">
+</head>
+<body>
+<div class="sweep"></div>
+<div class="tv" id="tv">
+
+  <header class="tv__top">
+    <span class="wordmark">Citadel</span>
+    <div class="tv__clock"><div class="tv__time" data-clock>21:04</div><div class="tv__date" data-date>Monday 21 September</div></div>
+  </header>
+
+  <section class="tv__banner">
+    <div class="tv__alert cut"><svg class="i"><use href="#i-bin"/></svg><span><b>Blue bin out tonight</b> — recycling collected tomorrow morning</span><span class="chip chip--today">Tonight</span></div>
+    <div class="tv__alert cut"><svg class="i"><use href="#i-bolt"/></svg><span><b>Gojira</b> — O2 Academy, Leeds</span><span class="chip chip--new">5 days</span></div>
+  </section>
+
+  <section class="stage">
+    <!-- Bins -->
+    <div class="panel" data-on>
+      <div class="big-list">
+        <span class="hud">Next collections</span>
+        <div class="card"><div class="card__in"><div class="tv-bin tv-bin--due" style="--sw:#5b7fd6"><span class="tv-bin__swatch"></span><div><div class="tv-bin__name">Recycling · Blue <small>Paper &amp; card</small></div><span class="chip chip--today">Put out tonight</span></div><div class="tv-bin__when">Tue 22 Sep<br>tomorrow</div></div></div></div>
+        <div class="card"><div class="card__in"><div class="tv-bin" style="--sw:#6b7280"><span class="tv-bin__swatch"></span><div class="tv-bin__name">Domestic · Grey <small>General waste</small></div><div class="tv-bin__when">Tue 6 Oct · in 15 days</div></div></div></div>
+      </div>
+    </div>
+
+    <!-- Next gig -->
+    <div class="panel">
+      <div class="big-list">
+        <span class="hud">Next gig</span>
+        <div class="card"><div class="card__in"><div class="tv-gig">
+          <div><div class="tv-gig__count">05</div></div>
+          <div><div class="tv-gig__unit">days to go</div><div class="tv-gig__name">Gojira</div><div class="tv-gig__sub">O2 Academy, Leeds · Sat 26 Sep · doors 18:30</div></div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- Diary -->
+    <div class="panel">
+      <div class="big-list">
+        <span class="hud">Coming up</span>
+        <div class="card"><div class="card__in">
+          <div class="tv-day"><div class="tv-day__d">Tomorrow</div><div><div class="tv-ev"><span class="tv-ev__t">09:30</span>Dentist<small>Salford Quays</small></div><div class="tv-ev"><span class="tv-ev__t">14:00</span>Car MOT</div></div></div>
+          <div class="tv-day"><div class="tv-day__d">Wed 23 Sep</div><div><div class="tv-ev"><span class="tv-ev__t">All day</span>Dan's birthday</div></div></div>
+          <div class="tv-day"><div class="tv-day__d">Sat 26 Sep</div><div><div class="tv-ev"><span class="tv-ev__t">18:30</span>Gojira<small>O2 Academy, Leeds</small></div></div></div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- Releases -->
+    <div class="panel">
+      <div class="big-list">
+        <span class="hud">New releases</span>
+        <div class="card"><div class="card__in"><div class="tv-rel"><span class="cover">G</span><div><div class="tv-rel__t">Gojira — Sample Album</div><div class="tv-rel__s">Album · <span class="chip chip--vinyl">Vinyl</span></div></div><div class="feed__date">Fri 25 Sep</div></div></div></div>
+        <div class="card"><div class="card__in"><div class="tv-rel"><span class="cover cover--b">M</span><div><div class="tv-rel__t">Mastodon — Sample EP</div><div class="tv-rel__s">EP</div></div><div class="feed__date">Fri 2 Oct</div></div></div></div>
+        <div class="card"><div class="card__in"><div class="tv-rel"><span class="cover cover--c">O</span><div><div class="tv-rel__t">Opeth — Sample Live</div><div class="tv-rel__s">Live album</div></div><div class="feed__date">Fri 16 Oct</div></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="tv__foot">
+    <span class="hud hud--plain"><span class="dot dot--ok" style="display:inline-block;margin-right:.8rem"></span>Live · updated 21:02</span>
+    <div class="pips" id="pips"></div>
+  </footer>
+</div>
+
+<div class="mockbar"><span>mock · sample data</span><a href="index.html">Owner</a><a href="guest.html">Guest</a><a href="tv.html" aria-current="page">TV</a></div>
+
+<script type="module" src="../js/icons.js"></script>
+<script type="module">
+  import './mock.js';
+  // rotate panels; slow pixel-shift for burn-in protection
+  const panels = [...document.querySelectorAll('.panel')];
+  const pips = document.getElementById('pips');
+  panels.forEach(() => pips.append(document.createElement('i')));
+  let n = 0;
+  const show = i => { panels.forEach((p, k) => p.toggleAttribute('data-on', k === i)); [...pips.children].forEach((x, k) => x.toggleAttribute('data-on', k === i)); };
+  show(0);
+  setInterval(() => { n = (n + 1) % panels.length; show(n); }, 8000);
+  const tv = document.getElementById('tv');
+  setInterval(() => { tv.style.transform = `translate(${Math.round(Math.random() * 8 - 4)}px, ${Math.round(Math.random() * 8 - 4)}px)`; }, 60000);
+</script>
+</body>
+</html>

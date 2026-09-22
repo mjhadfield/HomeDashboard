@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07060a">
+<title>Citadel · Pair this screen</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/guest.css">
+</head>
+<body>
+<div class="sweep"></div>
+<main class="guest">
+  <div class="guest__wrap">
+    <div class="guest__logo"><svg class="i"><use href="#i-logo"/></svg></div>
+    <span class="wordmark">Citadel</span>
+    <p class="guest__hello">Pair this screen</p>
+    <div class="pair__code" id="code" aria-live="polite">······</div>
+    <p class="pair__help">On your phone or computer, open the dashboard → <b>Settings → Screens &amp; devices → Pair a screen</b> and enter this code.</p>
+    <div class="guest__status hud hud--plain" id="status"><span class="dot dot--warn"></span>Waiting for approval</div>
+  </div>
+</main>
+<script type="module" src="/static/js/icons.js"></script>
+<script type="module" src="/static/js/pair.js"></script>
+</body>
+</html>

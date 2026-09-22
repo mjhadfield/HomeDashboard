@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07060a">
+<title>Citadel · TV</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/tv.css">
+</head>
+<body>
+<div class="sweep"></div>
+<div class="tv" id="tv">
+  <header class="tv__top">
+    <span class="wordmark">Citadel</span>
+    <div class="tv__clock"><div class="tv__time" data-clock></div><div class="tv__date" data-date></div></div>
+  </header>
+  <section class="tv__banner" id="banner"></section>
+  <section class="stage" id="stage"></section>
+  <footer class="tv__foot"><span class="hud hud--plain" id="foot"></span><div class="pips" id="pips"></div></footer>
+</div>
+<script type="module" src="/static/js/icons.js"></script>
+<script type="module" src="/static/js/tv.js"></script>
+</body>
+</html>

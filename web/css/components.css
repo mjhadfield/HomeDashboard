@@ -1,0 +1,171 @@
+/* ==========================================================================
+   Shared components: card, HUD label, chip, status dot, button, wordmark
+   ========================================================================== */
+
+[hidden] { display: none !important; }
+
+.i { width: 1.25em; height: 1.25em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---- Wordmark: the single "metal" nod ---------------------------------- */
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #ffffff 0%, #c9ced6 45%, #7d8493 52%, #d6dae1 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.25));
+}
+
+/* ---- HUD label ---------------------------------------------------------- */
+.hud {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--silver-mute);
+  white-space: nowrap;
+}
+.hud::before { content: "// "; color: var(--accent); }
+.hud--plain::before { content: none; }
+.mono { font-family: var(--font-mono); }
+.dim { color: var(--silver-mute); }
+
+/* ---- Card (chamfered, hairline border via gradient shell) -------------- */
+.card {
+  --c: var(--chamfer);
+  position: relative;
+  display: flex;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(201, 206, 214, 0.30), rgba(139, 92, 246, 0.20) 45%, rgba(201, 206, 214, 0.09));
+  clip-path: polygon(0 0, calc(100% - var(--c)) 0, 100% var(--c), 100% 100%, var(--c) 100%, 0 calc(100% - var(--c)));
+  transition: background .3s var(--ease);
+}
+.card:hover { background: linear-gradient(135deg, rgba(201, 206, 214, 0.38), rgba(168, 85, 247, 0.45) 45%, rgba(201, 206, 214, 0.12)); }
+.card__in {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface) 70%);
+  clip-path: polygon(0 0, calc(100% - var(--c) + 0.4px) 0, 100% calc(var(--c) - 0.4px), 100% 100%, calc(var(--c) - 0.4px) 100%, 0 calc(100% - var(--c) + 0.4px));
+}
+/* small accent tick, top-left */
+.card__in::before {
+  content: "";
+  height: 2px; width: 34px; margin: 0 0 0 16px;
+  background: linear-gradient(90deg, var(--accent-hi), transparent);
+  order: -1;
+}
+.card__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px 0;
+}
+.card__head .meta { font-family: var(--font-mono); font-size: 11px; color: var(--silver-dim); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.card__body { padding: 12px 16px 16px; flex: 1; min-width: 0; }
+.card__body--flush { padding-left: 0; padding-right: 0; }
+
+/* ---- .cut: chamfered top-right + bottom-left, with the diagonal edge stroked ------
+   clip-path removes the border on the cut corners; the two pseudo-elements redraw it.
+   Set --c (size) and --bc (border colour) on the element. */
+.cut {
+  --c: 10px; --bc: var(--edge-strong);
+  position: relative;
+  clip-path: polygon(0 0, calc(100% - var(--c)) 0, 100% var(--c), 100% 100%, var(--c) 100%, 0 calc(100% - var(--c)));
+}
+.cut::before, .cut::after {
+  content: ""; position: absolute; width: var(--c); height: var(--c); pointer-events: none;
+  background: linear-gradient(to bottom left, transparent calc(50% - .7px), var(--bc) calc(50% - .7px) calc(50% + .7px), transparent calc(50% + .7px));
+}
+.cut::before { top: 0; right: 0; }
+.cut::after  { bottom: 0; left: 0; }
+
+/* ---- Chips -------------------------------------------------------------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 2px 6px;
+  color: var(--silver-mute);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.chip--new    { color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); }
+.chip--vinyl  { color: var(--silver-hi); border-color: rgba(230, 233, 238, 0.35); }
+.chip--warn   { color: var(--warn); border-color: rgba(245, 180, 84, 0.4); }
+.chip--today  { color: #fff; background: var(--accent-deep); border-color: var(--accent); box-shadow: 0 0 14px rgba(139, 92, 246, 0.35); }
+/* The per-row "unseen" badge on a feed item — bolder than the header's quiet "N new" summary chip, so a new arrival
+   is unmistakable even scanning quickly down a list. */
+.chip--fresh  { color: #fff; font-weight: 700; background: var(--accent-deep); border-color: var(--accent-hi); box-shadow: 0 0 12px rgba(168, 85, 247, 0.45); }
+
+/* ---- Status dot --------------------------------------------------------- */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--silver-dim); flex: none; }
+.dot--ok   { background: var(--ok);   box-shadow: 0 0 8px rgba(52, 211, 153, 0.7); animation: pulse 3.4s ease-in-out infinite; }
+.dot--warn { background: var(--warn); box-shadow: 0 0 8px rgba(245, 180, 84, 0.6); }
+.dot--bad  { background: var(--bad);  box-shadow: 0 0 8px rgba(244, 63, 94, 0.6); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ---- Buttons ------------------------------------------------------------ */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--silver);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color .2s, border-color .2s, background .2s, box-shadow .2s;
+}
+.btn:hover { color: var(--silver-hi); border-color: var(--edge-strong); background: var(--accent-wash); }
+.btn--go   { color: var(--accent-soft); border-color: var(--edge-strong); }
+.btn--go:hover { box-shadow: 0 0 16px rgba(139, 92, 246, 0.3); }
+.btn--stop:hover { color: #fda4af; border-color: rgba(244, 63, 94, 0.5); background: rgba(244, 63, 94, 0.08); }
+.btn--icon { padding: 5px; }
+.btn[disabled] { opacity: .4; cursor: not-allowed; }
+.btn .i { width: 14px; height: 14px; }
+
+/* ---- Generic list row --------------------------------------------------- */
+.rows { list-style: none; margin: 0; padding: 0; }
+.rows > li { border-top: 1px solid var(--edge); }
+.rows > li:first-child { border-top: 0; }
+
+/* ---- Cover: a lettered tile, with the record's artwork laid over it where a store gives one -- */
+.cover {
+  width: 44px; height: 44px; flex: none;
+  display: grid; place-items: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 16px; color: rgba(255, 255, 255, .85);
+  border: 1px solid var(--edge);
+  background: linear-gradient(135deg, var(--accent-deep), #14102a);
+  position: relative;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+.cover--b { background: linear-gradient(135deg, #2b2f3a, #0f1015); }
+.cover--c { background: linear-gradient(135deg, #6d28d9, #1e1b4b); }
+.cover--d { background: linear-gradient(135deg, #4b5563, #1f1b2e); }
+
+/* ---- One-off top sweep line (page load) --------------------------------- */
+.sweep { position: fixed; top: 0; left: 0; height: 1px; width: 100%; z-index: 101; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--accent-hi), transparent);
+  transform: translateX(-100%); animation: sweep 1.6s var(--ease) .2s 1 forwards; }
+@keyframes sweep { to { transform: translateX(100%); } }
+
+/* mock-only switcher (removed in the real build) */
+.mockbar {
+  position: fixed; right: 12px; bottom: 12px; z-index: 200;
+  display: flex; gap: 4px; padding: 4px;
+  background: rgba(7, 6, 10, .85); border: 1px solid var(--edge); backdrop-filter: blur(6px);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+}
+.mockbar a { padding: 5px 8px; color: var(--silver-mute); }
+.mockbar a[aria-current] { color: var(--silver-hi); background: var(--accent-deep); }
+.mockbar a:hover { color: var(--silver-hi); }
+.mockbar span { padding: 5px 6px; color: var(--silver-dim); }
+
+/* ---- Toast (used by the dashboard and Settings) ------------------------------------- */
+.toast { position: fixed; left: 50%; bottom: 28px; z-index: 300; max-width: min(90vw, 560px); padding: 12px 18px; transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; color: var(--silver-hi);
+  background: rgba(21, 16, 33, .96); border: 1px solid rgba(244, 63, 94, .5); transition: opacity .25s, transform .25s var(--ease); }
+.toast.is-on { opacity: 1; transform: translate(-50%, 0); }

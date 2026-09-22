@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07060a">
+<title>Citadel</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/components.css">
+<link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+<div class="sweep"></div>
+
+<div class="shell">
+  <nav class="rail" aria-label="Primary">
+    <span class="rail__logo"><svg class="i"><use href="#i-logo"/></svg></span>
+    <a href="#home" data-view="home" aria-current="page" title="Home"><svg class="i"><use href="#i-home"/></svg></a>
+    <a href="#news" data-view="news" title="News"><svg class="i"><use href="#i-news"/></svg></a>
+    <a href="#media" data-view="media" title="Media"><svg class="i"><use href="#i-film"/></svg></a>
+    <a href="#music" data-view="music" title="Companion"><svg class="i"><use href="#i-disc"/></svg></a>
+    <span class="spacer"></span>
+    <a href="/settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg></a>
+  </nav>
+
+  <main class="main">
+    <header class="top">
+      <div class="top__brand"><span class="wordmark">Citadel</span><span class="hud" id="host-label"></span></div>
+      <div class="top__right"><a class="btn btn--icon top__settings" href="/settings" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></a><span class="hud hud--plain badge-role"><span class="dot" id="conn-dot" title="connecting…"></span><span id="device-label">Owner device</span></span></div>
+    </header>
+    <section class="view is-active" id="view-home" data-view="home">
+      <section class="alerts" id="alerts" aria-label="Reminders"></section>
+      <div class="grid" id="grid"></div>
+    </section>
+    <section class="view" id="view-news" data-view="news" aria-label="News"></section>
+    <section class="view" id="view-media" data-view="media" aria-label="Media">
+      <div class="frame-shell"><iframe id="media-frame" title="Media" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
+    </section>
+    <section class="view" id="view-music" data-view="music" aria-label="Companion">
+      <div class="frame-shell"><iframe id="music-frame" title="Music Companion" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
+    </section>
+  </main>
+</div>
+
+<nav class="tabbar" aria-label="Primary (mobile)">
+  <a href="#home" data-view="home" aria-current="page"><svg class="i"><use href="#i-home"/></svg>Home</a>
+  <a href="#news" data-view="news"><svg class="i"><use href="#i-news"/></svg>News</a>
+  <a href="#media" data-view="media"><svg class="i"><use href="#i-film"/></svg>Media</a>
+  <a href="#music" data-view="music"><svg class="i"><use href="#i-disc"/></svg>Companion</a>
+</nav>
+
+<script type="module" src="/static/js/icons.js"></script>
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

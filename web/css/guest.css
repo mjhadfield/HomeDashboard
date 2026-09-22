@@ -1,0 +1,29 @@
+/* Guest page: one thing, done beautifully. Nothing owner-related is rendered at all. */
+.guest { min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; }
+.guest__wrap { width: min(520px, 100%); text-align: center; }
+.guest__logo { color: var(--accent-hi); filter: drop-shadow(0 0 16px rgba(168, 85, 247, .55)); margin-bottom: 14px; }
+.guest__logo .i { width: 46px; height: 46px; }
+.guest .wordmark { font-size: 30px; display: block; }
+.guest__hello { margin: 14px 0 34px; color: var(--silver-mute); }
+
+.door {
+  display: block; position: relative; padding: 30px 24px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, .22), rgba(76, 29, 149, .10) 60%, rgba(14, 11, 20, .9));
+  border: 1px solid var(--edge-strong);
+  --c: 22px;
+  transition: box-shadow .3s var(--ease), background .3s;
+  box-shadow: 0 0 0 rgba(139, 92, 246, 0);
+}
+.door:hover { background: linear-gradient(135deg, rgba(168, 85, 247, .32), rgba(76, 29, 149, .16) 60%, rgba(14, 11, 20, .9)); }
+.door:active { transform: translateY(1px); }
+.door .i { width: 44px; height: 44px; color: var(--accent-soft); margin-bottom: 10px; }
+.door__title { display: block; font-size: 30px; font-weight: 700; letter-spacing: .06em; color: var(--silver-hi); }
+.door__sub { display: block; margin-top: 4px; font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-mute); }
+.guest__status { margin-top: 22px; display: inline-flex; align-items: center; gap: 8px; }
+.guest__foot { margin-top: 44px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; color: var(--silver-dim); text-transform: uppercase; }
+
+/* pairing page */
+.pair__code { margin: 8px 0 22px; font-family: var(--font-mono); font-weight: 700; font-size: clamp(44px, 12vw, 84px); letter-spacing: .22em; padding-left: .22em; color: var(--silver-hi);
+  text-shadow: 0 0 28px rgba(168, 85, 247, .45); }
+.pair__help { max-width: 40ch; margin: 0 auto 6px; color: var(--silver-mute); line-height: 1.55; }
+.pair__help b { color: var(--silver); font-weight: 600; }
