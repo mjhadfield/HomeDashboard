@@ -7,6 +7,7 @@
 <title>Citadel</title>
 <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
 <link rel="stylesheet" href="/static/css/tokens.css">
+<script src="/static/js/theme-init.js"></script>
 <link rel="stylesheet" href="/static/css/components.css">
 <link rel="stylesheet" href="/static/css/dashboard.css">
 </head>
@@ -16,18 +17,19 @@
 <div class="shell">
   <nav class="rail" aria-label="Primary">
     <span class="rail__logo"><svg class="i"><use href="#i-logo"/></svg></span>
-    <a href="#home" data-view="home" aria-current="page" title="Home"><svg class="i"><use href="#i-home"/></svg></a>
-    <a href="#news" data-view="news" title="News"><svg class="i"><use href="#i-news"/></svg></a>
-    <a href="#media" data-view="media" title="Media"><svg class="i"><use href="#i-film"/></svg></a>
-    <a href="#music" data-view="music" title="Companion"><svg class="i"><use href="#i-disc"/></svg></a>
+    <a href="#home" data-view="home" aria-current="page" title="Home"><svg class="i"><use href="#i-home"/></svg><span class="rail__label">Home</span></a>
+    <a href="#news" data-view="news" title="News"><svg class="i"><use href="#i-news"/></svg><span class="rail__label">News</span></a>
+    <a href="#media" data-view="media" title="Media"><svg class="i"><use href="#i-film"/></svg><span class="rail__label">Media</span></a>
+    <a href="#music" data-view="music" title="Companion"><svg class="i"><use href="#i-disc"/></svg><span class="rail__label">Companion</span></a>
+    <a href="#sql" data-view="sql" title="SQL DB"><svg class="i"><use href="#i-server"/></svg><span class="rail__label">SQL DB</span></a>
     <span class="spacer"></span>
-    <a href="/settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg></a>
+    <a href="/settings" class="rail__settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg><span class="rail__label">Settings</span></a>
   </nav>
 
   <main class="main">
     <header class="top">
       <div class="top__brand"><span class="wordmark">Citadel</span><span class="hud" id="host-label"></span></div>
-      <div class="top__right"><a class="btn btn--icon top__settings" href="/settings" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></a><span class="hud hud--plain badge-role"><span class="dot" id="conn-dot" title="connecting…"></span><span id="device-label">Owner device</span></span></div>
+      <div class="top__right"><a class="btn btn--icon top__settings" href="/settings" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></a><button class="btn btn--icon theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Switch to light theme" title="Toggle light/dark theme"><svg class="i"><use href="#i-sun"/></svg></button><span class="hud hud--plain badge-role"><span class="dot" id="conn-dot" title="connecting…"></span><span id="device-label">Owner device</span></span></div>
     </header>
     <section class="view is-active" id="view-home" data-view="home">
       <section class="alerts" id="alerts" aria-label="Reminders"></section>
@@ -40,6 +42,9 @@
     <section class="view" id="view-music" data-view="music" aria-label="Companion">
       <div class="frame-shell"><iframe id="music-frame" title="Music Companion" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
     </section>
+    <section class="view" id="view-sql" data-view="sql" aria-label="SQL DB">
+      <div class="frame-shell"><iframe id="sql-frame" title="SQL DB" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
+    </section>
   </main>
 </div>
 
@@ -48,6 +53,7 @@
   <a href="#news" data-view="news"><svg class="i"><use href="#i-news"/></svg>News</a>
   <a href="#media" data-view="media"><svg class="i"><use href="#i-film"/></svg>Media</a>
   <a href="#music" data-view="music"><svg class="i"><use href="#i-disc"/></svg>Companion</a>
+  <a href="#sql" data-view="sql"><svg class="i"><use href="#i-server"/></svg>SQL DB</a>
 </nav>
 
 <script type="module" src="/static/js/icons.js"></script>

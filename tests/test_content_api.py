@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from app import config, content, db
+from app.widgets import vinyl
 from tests.test_content import make_music_db
 
 BASE = "/api/owner"
@@ -35,7 +36,8 @@ def test_guests_cannot_touch_any_content_route(guest_client):
     assert guest_client.get(f"{BASE}/gigs").status_code == 403
     for method, path, body in (("post", "/artists", {"name": "X"}), ("patch", "/artists/1", {"status": "mute"}), ("delete", "/artists/1", None),
                                ("post", "/artists/resync", None), ("post", "/gigs", GIG), ("put", "/gigs/1", GIG), ("delete", "/gigs/1", None),
-                               ("post", "/items/1/status", {"status": "seen"}), ("post", "/items/mark-seen/news", None), ("post", "/items/1/read", None)):
+                               ("post", "/items/1/status", {"status": "seen"}), ("post", "/items/mark-seen/news", None), ("post", "/items/1/read", None),
+                               ("patch", "/items/1/date", {"date": None}), ("delete", "/items/1", None), ("post", "/vinyl/preorders", {"artist": "X", "title": "Y"})):
         r = getattr(guest_client, method)(BASE + path, headers=h, **({"json": body} if body is not None else {}))
         assert r.status_code == 403, (method, path)
 
@@ -53,6 +55,74 @@ def test_item_curation_endpoints(owner_client):
     assert owner_client.post(f"{BASE}/items/{iid}/read").status_code == 200
     reread = next(i for i in content.list_items("news")["items"] if i["id"] == iid)
     assert reread["meta"].get("read") is True and reread["status"] == "pinned"              # reading doesn't disturb status
+
+
+def test_marking_an_item_purchased_moves_it_to_confirmed_preorders(owner_client):
+    content.upsert_items("vinyl", "shop-a", [{"external_id": "1", "artist": "Ghost", "title": "Skeletá", "date": "2027-01-01"}], baseline=True)
+    iid = content.list_items("vinyl")["items"][0]["id"]
+    assert owner_client.post(f"{BASE}/items/{iid}/status", json={"status": "purchased"}).status_code == 200
+    state = owner_client.get(f"{BASE}/state").json()
+    assert all(i["id"] != iid for i in state["widgets"]["vinyl"]["data"]["items"])
+    pre = next(p for p in state["widgets"]["vinyl"]["data"]["preorders"] if p["id"] == iid)
+    assert pre["artist"] == "Ghost" and pre["title"] == "Skeletá"
+
+
+def test_removing_a_confirmed_preorder_requires_purchased_status(owner_client):
+    content.upsert_items("vinyl", "shop-a", [{"external_id": "1", "artist": "Ghost", "title": "Skeletá", "date": "2027-01-01"}], baseline=True)
+    iid = content.list_items("vinyl")["items"][0]["id"]
+    assert owner_client.delete(f"{BASE}/items/{iid}").status_code == 409                     # not purchased yet
+    owner_client.post(f"{BASE}/items/{iid}/status", json={"status": "purchased"})
+    assert owner_client.delete(f"{BASE}/items/{iid}").status_code == 200
+    assert content.list_purchased("vinyl") == []
+    assert owner_client.delete(f"{BASE}/items/99999").status_code == 404
+
+
+def test_inline_date_edit_validates_and_accepts_tbc(owner_client):
+    iid = content.add_manual_purchase("vinyl", artist="Ghost", title="Skeletá", variant="", date=None, image="")
+    assert owner_client.patch(f"{BASE}/items/{iid}/date", json={"date": "not-a-date"}).status_code == 422
+    assert owner_client.patch(f"{BASE}/items/{iid}/date", json={"date": "2027-06-01"}).status_code == 200
+    assert content.list_purchased("vinyl")[0]["date"] == "2027-06-01"
+    assert owner_client.patch(f"{BASE}/items/{iid}/date", json={"date": None}).status_code == 200
+    assert content.list_purchased("vinyl")[0]["date"] is None
+    assert owner_client.patch(f"{BASE}/items/99999/date", json={"date": None}).status_code == 404
+
+
+def test_manual_purchase_endpoint_creates_a_confirmed_preorder(owner_client, monkeypatch):
+    async def fake_cover(url):
+        return "/covers/fake.jpg"
+    monkeypatch.setattr(vinyl, "fetch_manual_cover", fake_cover)
+
+    body = {"artist": "Ghost", "title": "Skeletá", "variant": "Ltd. clear vinyl", "date": "2027-06-01", "image_url": "https://example.com/x.jpg"}
+    r = owner_client.post(f"{BASE}/vinyl/preorders", json=body)
+    assert r.status_code == 201
+    p = content.list_purchased("vinyl")[0]
+    assert p["artist"] == "Ghost" and p["source"] == "manual" and p["meta"]["image"] == "/covers/fake.jpg"
+
+    assert owner_client.post(f"{BASE}/vinyl/preorders", json={**body, "image_url": "not a url"}).status_code == 422
+
+
+def test_a_preorder_within_seven_days_raises_a_reminder_with_a_persistent_badge_outside_it(owner_client):
+    assert not any(a["kind"] == "vinyl" for a in alerts(owner_client))
+    content.add_manual_purchase("vinyl", artist="Ghost", title="Far off", variant="", date=local_date(20), image="")
+    assert not any(a["kind"] == "vinyl" for a in alerts(owner_client))                        # 20 days out: no alert yet
+    far = next(p for p in owner_client.get(f"{BASE}/state").json()["widgets"]["vinyl"]["data"]["preorders"] if p["title"] == "Far off")
+    assert far["in_days"] == 20                                                               # but the badge is always there
+
+    content.add_manual_purchase("vinyl", artist="Ghost", title="Soon", variant="", date=local_date(1), image="")
+    a = next(a for a in alerts(owner_client) if a["kind"] == "vinyl")
+    assert a["chip"] == "Tomorrow" and a["level"] == "soon" and "Soon" in a["title"]
+
+    with db.db() as con:
+        con.execute("UPDATE feed_items SET date = ? WHERE title = 'Soon'", (local_date(0),))
+    a = next(a for a in alerts(owner_client) if a["kind"] == "vinyl")
+    assert a["chip"] == "Today" and a["level"] == "now"
+
+
+def test_tv_never_gets_vinyl_alerts(owner_client):
+    content.add_manual_purchase("vinyl", artist="Ghost", title="Soon", variant="", date=local_date(0), image="")
+    owner_client.put(f"{BASE}/screens", json={"panels": ["bins", "diary", "gigs"], "rotate_seconds": 12, "show_alerts": True})
+    s = owner_client.get("/api/kiosk/state").json()
+    assert not any(a["kind"] == "vinyl" for a in s["alerts"])
     assert owner_client.post(f"{BASE}/items/99999/read").status_code == 404
 
 

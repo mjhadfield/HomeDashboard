@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
+from uuid import uuid4
 
 import httpx
 from bs4 import BeautifulSoup
@@ -48,6 +49,7 @@ SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "CAD": "CA$", "AUD": "A$"}
 VINYL_RE = re.compile(r'vinyl|\bLPs?\b|\b\dx?LP\b|\b12"|\b10"|\b7"|picture ?disc', re.I)
 NOT_MUSIC_RE = re.compile(r"\b(?:t-?shirts?|hoodies?|sweatshirts?|longsleeves?|jackets?|posters?|patch(?:es)?|flags?|slipmats?|beanies?|caps?|totes?|mugs?|pins?|stickers?|puzzles?|books?|blankets?|dresses|shorts|socks)\b", re.I)
 PREORDER_RE = re.compile(r"pre-?orders?", re.I)
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")   # a full release date, as opposed to a partial/placeholder one — only these get a countdown
 GENERIC_TAGS = {"vinyl", "lp", "cd", "music", "media", "metal", "rock", "punk", "hardcore", "new", "limited", "preorder", "colored", "coloured", "men", "women", "apparel", "merch"}
 SPLITTERS = re.compile(r"\s+(?:/|&|\+|x|and|feat\.?|ft\.?|vs\.?)\s+", re.I)
 
@@ -485,6 +487,32 @@ async def check_shop(url: str, collection: str, kind: str = "shopify") -> dict[s
             "note": "" if collection else "No collection given: only products flagged as pre-order in the first 250 will be found — a pre-order collection (e.g. “pre-orders”) is better."}
 
 
+COVER_MAX_BYTES = 8_000_000
+COVERS_DIR = config.DATA_DIR / "covers"
+
+
+async def fetch_manual_cover(url: str) -> str:
+    """Best-effort: an owner-pasted image URL for a manually-added purchase, fetched and saved once rather than
+    hotlinked — the page's CSP only allows img-src from a fixed, curated set of CDNs (see main.py), so an arbitrary
+    URL would just be silently blocked in the browser. A failure here isn't different from "no picture given" —
+    same stance as attach_art elsewhere in this app — so this never raises, it just returns "" on any problem."""
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            ctype = resp.headers.get("content-type", "")
+            if not ctype.startswith("image/") or len(resp.content) > COVER_MAX_BYTES:
+                return ""
+            ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(ctype.split(";")[0].strip(), "jpg")
+            COVERS_DIR.mkdir(parents=True, exist_ok=True)
+            name = f"{uuid4().hex}.{ext}"
+            (COVERS_DIR / name).write_bytes(resp.content)
+            return f"/covers/{name}"
+    except Exception:
+        log.warning("Couldn't fetch manual cover image from %s", url, exc_info=True)
+        return ""
+
+
 class VinylWidget(Widget):
     id = "vinyl"
     title = "Vinyl radar"
@@ -572,7 +600,12 @@ class VinylWidget(Widget):
         enabled = {s["id"]: s["name"] for s in settings["shops"] if s.get("enabled")}
         out = content.list_items("vinyl", source_priority=tuple(s["id"] for s in settings["shops"]),
                                  keep=lambda i: i["source"] in enabled)
-        return {**out, "stores": len(enabled), "following": len(content.list_artists()), "errors": (data or {}).get("errors", [])}
+        today = now.date()
+        preorders = []
+        for p in content.list_purchased("vinyl"):
+            in_days = (date.fromisoformat(p["date"]) - today).days if p["date"] and DATE_RE.match(p["date"]) else None
+            preorders.append({**p, "in_days": in_days})
+        return {**out, "stores": len(enabled), "following": len(content.list_artists()), "errors": (data or {}).get("errors", []), "preorders": preorders}
 
 
 widget = VinylWidget()

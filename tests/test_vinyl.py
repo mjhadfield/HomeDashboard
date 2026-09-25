@@ -355,6 +355,35 @@ def test_the_same_record_at_two_shops_shows_once_from_the_first_listed():
     assert [(i["source"], i["subtitle"]) for i in items] == [("earache", "£25.00")]
 
 
+def test_view_splits_out_purchased_items_with_a_countdown_and_excludes_them_from_items():
+    content.upsert_items("vinyl", "earache", [{"external_id": "1", "artist": "Ghost", "title": "Skeletá", "date": "2026-09-29", "meta": {"shop": "Earache"}}], baseline=True)
+    iid = content.list_items("vinyl")["items"][0]["id"]
+    content.set_status(iid, "purchased")
+    v = vinyl.widget.view(None, with_shops(SHOP), NOW)                            # NOW = 2026-09-22
+    assert all(i["id"] != iid for i in v["items"])
+    pre = next(p for p in v["preorders"] if p["id"] == iid)
+    assert pre["in_days"] == 7
+
+    content.add_manual_purchase("vinyl", artist="Ghost", title="TBC one", variant="", date=None, image="")
+    tbc = next(p for p in vinyl.widget.view(None, with_shops(SHOP), NOW)["preorders"] if p["title"] == "TBC one")
+    assert tbc["in_days"] is None
+
+
+def test_fetch_manual_cover_downloads_saves_locally_and_is_best_effort(monkeypatch, tmp_path):
+    monkeypatch.setattr(vinyl, "COVERS_DIR", tmp_path / "covers")
+    patch_http(monkeypatch, vinyl, {
+        "https://good.example/cover.jpg": httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"\xff\xd8\xff fake jpeg"),
+        "https://bad.example/not-an-image": httpx.Response(200, headers={"content-type": "text/html"}, content=b"<html></html>"),
+        "https://down.example/x.jpg": httpx.Response(500),
+    })
+    path = run(vinyl.fetch_manual_cover("https://good.example/cover.jpg"))
+    assert path.startswith("/covers/") and path.endswith(".jpg")
+    assert (tmp_path / "covers" / path.removeprefix("/covers/")).read_bytes() == b"\xff\xd8\xff fake jpeg"
+
+    assert run(vinyl.fetch_manual_cover("https://bad.example/not-an-image")) == ""            # wrong content-type
+    assert run(vinyl.fetch_manual_cover("https://down.example/x.jpg")) == ""                  # HTTP error -> best-effort, no raise
+
+
 # ======================================================= settings + store check
 
 def test_store_settings_are_validated_and_ids_stay_unique():

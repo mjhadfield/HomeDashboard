@@ -38,6 +38,7 @@ class LinkIn(BaseModel):
     pinned: bool | None = None          # None = leave unchanged (so older clients can't accidentally unpin)
     for_media: bool = False             # this link's url is what the Media page embeds — at most one at a time
     for_music: bool = False             # same idea, for the Companion page — independent of for_media
+    for_sql: bool = False               # same idea, for the SQL DB page — independent of the other two
 
     @field_validator("url")
     @classmethod

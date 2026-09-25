@@ -22,7 +22,7 @@ KIND_WIDGET = {"release": "releases", "vinyl": "vinyl", "radar": "radar", "news"
 # ---- curating items ------------------------------------------------------------------------------------------
 
 class ItemStatusIn(BaseModel):
-    status: Literal["new", "seen", "pinned", "dismissed"]
+    status: Literal["new", "seen", "pinned", "dismissed", "purchased"]
 
 
 @router.post("/items/{item_id}/status")
@@ -51,6 +51,89 @@ async def item_read(item_id: int):
         raise HTTPException(404, "no such item")
     notify.widget(KIND_WIDGET[row["kind"]])
     return {"ok": True}
+
+
+class ItemDateIn(BaseModel):
+    date: str | None = None
+
+    @field_validator("date")
+    @classmethod
+    def _date(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError:
+            raise ValueError("date must be a real date like 2026-09-26, or blank for TBC")
+
+
+@router.patch("/items/{item_id}/date")
+async def item_date(item_id: int, body: ItemDateIn):
+    """A pre-order's own release date is store-supplied and often TBC at first — this lets it be filled in or
+    corrected by hand once known, without waiting for the store to publish one (or overriding a wrong one)."""
+    with db.db() as con:
+        row = con.execute("SELECT kind FROM feed_items WHERE id = ?", (item_id,)).fetchone()
+    if not row or not content.set_date(item_id, body.date):
+        raise HTTPException(404, "no such item")
+    notify.widget(KIND_WIDGET[row["kind"]])
+    return {"ok": True}
+
+
+@router.delete("/items/{item_id}")
+async def item_delete(item_id: int):
+    """Removing an item outright is deliberately scoped to Confirmed Pre-orders ('received it, done tracking it')
+    — not a general delete-anything endpoint; every other card curates via status (dismiss/pin/etc.)."""
+    with db.db() as con:
+        row = con.execute("SELECT kind, status FROM feed_items WHERE id = ?", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "no such item")
+    if row["status"] != "purchased":
+        raise HTTPException(409, "only a purchased item can be removed this way")
+    content.delete_item(item_id)
+    notify.widget(KIND_WIDGET[row["kind"]])
+    return {"ok": True}
+
+
+# ---- vinyl: manually-added purchases --------------------------------------------------------------------------
+
+class ManualPreorderIn(BaseModel):
+    artist: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=200)
+    variant: str = Field("", max_length=120)
+    date: str | None = None
+    image_url: str | None = Field(None, max_length=500)
+    product_url: str | None = Field(None, max_length=500)
+
+    @field_validator("date")
+    @classmethod
+    def _date(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError:
+            raise ValueError("date must be a real date like 2026-09-26, or blank if TBC")
+
+    @field_validator("image_url")
+    @classmethod
+    def _image(cls, v: str | None) -> str | None:
+        return http_url(v, field="cover image") if v and v.strip() else None
+
+    @field_validator("product_url")
+    @classmethod
+    def _product(cls, v: str | None) -> str | None:
+        return http_url(v, field="product page link") if v and v.strip() else None
+
+
+@router.post("/vinyl/preorders", status_code=201)
+async def add_manual_preorder(body: ManualPreorderIn):
+    """Settings → Music → Vinyl pre-orders: a record bought somewhere this app doesn't watch, added by hand so it
+    shows up in Confirmed Pre-orders alongside anything bought straight from a tracked store."""
+    image = await vinyl.fetch_manual_cover(body.image_url) if body.image_url else ""
+    iid = content.add_manual_purchase("vinyl", artist=body.artist.strip(), title=body.title.strip(),
+                                       variant=body.variant.strip(), date=body.date, image=image, url=body.product_url)
+    notify.widget("vinyl")
+    return {"id": iid}
 
 
 # ---- followed artists ----------------------------------------------------------------------------------------

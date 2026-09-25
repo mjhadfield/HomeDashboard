@@ -12,10 +12,10 @@
   font-weight: 700;
   letter-spacing: 0.34em;
   text-transform: uppercase;
-  background: linear-gradient(180deg, #ffffff 0%, #c9ced6 45%, #7d8493 52%, #d6dae1 100%);
+  background: linear-gradient(180deg, var(--silver-hi) 0%, var(--silver) 45%, var(--silver-mute) 52%, var(--silver-hi) 100%);
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.25));
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 25%, transparent));
 }
 
 /* ---- HUD label ---------------------------------------------------------- */
@@ -29,6 +29,14 @@
 }
 .hud::before { content: "// "; color: var(--accent); }
 .hud--plain::before { content: none; }
+/* Dual-content tile header (Vinyl radar's "Vinyl Radar // Confirmed Pre-orders"): two real buttons inside one
+   .hud span, so the "// " prefix above still applies once, to the group, unchanged. */
+.hud__seg { background: none; border: 0; padding: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; transition: color .2s; }
+.hud__seg:hover { color: var(--silver-hi); }
+.hud__seg[aria-pressed="true"] { color: var(--accent-soft); }
+/* A leading plain space in generated content collapses away since it lands at the very start of the button's own
+   box (buttons are inline-block by default) — a non-breaking space survives that. */
+.hud__seg + .hud__seg::before { content: "\00a0// "; color: var(--accent); }
 .mono { font-family: var(--font-mono); }
 .dim { color: var(--silver-mute); }
 
@@ -38,11 +46,11 @@
   position: relative;
   display: flex;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(201, 206, 214, 0.30), rgba(139, 92, 246, 0.20) 45%, rgba(201, 206, 214, 0.09));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--silver) 30%, transparent), color-mix(in srgb, var(--accent) 20%, transparent) 45%, color-mix(in srgb, var(--silver) 9%, transparent));
   clip-path: polygon(0 0, calc(100% - var(--c)) 0, 100% var(--c), 100% 100%, var(--c) 100%, 0 calc(100% - var(--c)));
   transition: background .3s var(--ease);
 }
-.card:hover { background: linear-gradient(135deg, rgba(201, 206, 214, 0.38), rgba(168, 85, 247, 0.45) 45%, rgba(201, 206, 214, 0.12)); }
+.card:hover { background: linear-gradient(135deg, color-mix(in srgb, var(--silver) 38%, transparent), color-mix(in srgb, var(--accent-hi) 45%, transparent) 45%, color-mix(in srgb, var(--silver) 12%, transparent)); }
 .card__in {
   flex: 1;
   min-width: 0;
@@ -93,18 +101,18 @@
   white-space: nowrap;
 }
 .chip--new    { color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); }
-.chip--vinyl  { color: var(--silver-hi); border-color: rgba(230, 233, 238, 0.35); }
-.chip--warn   { color: var(--warn); border-color: rgba(245, 180, 84, 0.4); }
-.chip--today  { color: #fff; background: var(--accent-deep); border-color: var(--accent); box-shadow: 0 0 14px rgba(139, 92, 246, 0.35); }
+.chip--vinyl  { color: var(--silver-hi); border-color: color-mix(in srgb, var(--silver-hi) 35%, transparent); }
+.chip--warn   { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip--today  { color: #fff; background: var(--accent-deep); border-color: var(--accent); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent); }
 /* The per-row "unseen" badge on a feed item — bolder than the header's quiet "N new" summary chip, so a new arrival
    is unmistakable even scanning quickly down a list. */
-.chip--fresh  { color: #fff; font-weight: 700; background: var(--accent-deep); border-color: var(--accent-hi); box-shadow: 0 0 12px rgba(168, 85, 247, 0.45); }
+.chip--fresh  { color: #fff; font-weight: 700; background: var(--accent-deep); border-color: var(--accent-hi); box-shadow: 0 0 12px color-mix(in srgb, var(--accent-hi) 45%, transparent); }
 
 /* ---- Status dot --------------------------------------------------------- */
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--silver-dim); flex: none; }
-.dot--ok   { background: var(--ok);   box-shadow: 0 0 8px rgba(52, 211, 153, 0.7); animation: pulse 3.4s ease-in-out infinite; }
-.dot--warn { background: var(--warn); box-shadow: 0 0 8px rgba(245, 180, 84, 0.6); }
-.dot--bad  { background: var(--bad);  box-shadow: 0 0 8px rgba(244, 63, 94, 0.6); }
+.dot--ok   { background: var(--ok);   box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 70%, transparent); animation: pulse 3.4s ease-in-out infinite; }
+.dot--warn { background: var(--warn); box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent); }
+.dot--bad  { background: var(--bad);  box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 60%, transparent); }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 
 /* ---- Buttons ------------------------------------------------------------ */
@@ -121,11 +129,12 @@
 }
 .btn:hover { color: var(--silver-hi); border-color: var(--edge-strong); background: var(--accent-wash); }
 .btn--go   { color: var(--accent-soft); border-color: var(--edge-strong); }
-.btn--go:hover { box-shadow: 0 0 16px rgba(139, 92, 246, 0.3); }
-.btn--stop:hover { color: #fda4af; border-color: rgba(244, 63, 94, 0.5); background: rgba(244, 63, 94, 0.08); }
+.btn--go:hover { box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 30%, transparent); }
+.btn--stop:hover { color: #fda4af; border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 8%, transparent); }
 .btn--icon { padding: 5px; }
 .btn[disabled] { opacity: .4; cursor: not-allowed; }
 .btn .i { width: 14px; height: 14px; }
+.theme-toggle[aria-pressed="true"] { color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); }
 
 /* ---- Generic list row --------------------------------------------------- */
 .rows { list-style: none; margin: 0; padding: 0; }
@@ -167,5 +176,5 @@
 /* ---- Toast (used by the dashboard and Settings) ------------------------------------- */
 .toast { position: fixed; left: 50%; bottom: 28px; z-index: 300; max-width: min(90vw, 560px); padding: 12px 18px; transform: translate(-50%, 12px); opacity: 0; pointer-events: none;
   font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; color: var(--silver-hi);
-  background: rgba(21, 16, 33, .96); border: 1px solid rgba(244, 63, 94, .5); transition: opacity .25s, transform .25s var(--ease); }
+  background: color-mix(in srgb, var(--surface-2) 96%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 50%, transparent); transition: opacity .25s, transform .25s var(--ease); }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }

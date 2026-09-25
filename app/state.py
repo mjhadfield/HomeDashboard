@@ -95,7 +95,7 @@ def links_state(health: Health, guest_only: bool = False) -> list[dict[str, Any]
         out.append({
             "id": r["id"], "name": r["name"], "subtitle": r["subtitle"], "url": r["url"], "icon": r["icon"],
             "primary": bool(r["is_primary"]), "tier": r["tier"], "pinned": r["pin_order"] is not None, "pin_order": r["pin_order"],
-            "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]),
+            "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"]),
             "up": (h["ok"] if h else None),   # None = no health check configured / not probed yet
         })
     return out
@@ -145,6 +145,16 @@ def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dic
                 alerts.append({"kind": "event", "icon": "cal", "title": e["title"],
                                "detail": e["location"] or e["time"], "chip": f"in {mins // 60}h {mins % 60:02d}m" if mins >= 60 else f"in {mins}m", "level": "soon"})
                 break
+
+    vinyl = widgets.get("vinyl", {})
+    if vinyl.get("data"):
+        for p in vinyl["data"].get("preorders", []):
+            if p["in_days"] is None or not (0 <= p["in_days"] <= 7):
+                continue
+            chip = "Today" if p["in_days"] == 0 else "Tomorrow" if p["in_days"] == 1 else f"in {p['in_days']} days"
+            variant = (p.get("meta") or {}).get("variant") or (p.get("meta") or {}).get("format") or "pre-order"
+            alerts.append({"kind": "vinyl", "icon": "disc", "title": f"{p['artist']} — {p['title']}" if p["artist"] else p["title"],
+                           "detail": variant, "chip": chip, "level": "now" if p["in_days"] == 0 else "soon"})
     return alerts
 
 

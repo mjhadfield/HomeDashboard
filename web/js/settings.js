@@ -49,6 +49,7 @@ function linkForm(l = {}) {
       ${check('more', 'Only in the expanded Launchpad', l.tier === 'more')}
       ${check('for_media', 'Use as Media view', l.for_media, 'Embedded in the Media page — only one link can be it at a time; picking a new one replaces it.')}
       ${check('for_music', 'Use as Companion view', l.for_music, 'Embedded in the Companion page — only one link can be it at a time; picking a new one replaces it.')}
+      ${check('for_sql', 'Use as SQL DB view', l.for_sql, 'Embedded in the SQL DB page — only one link can be it at a time; picking a new one replaces it.')}
     </div>
     <div class="form-actions">${act('cancel', 'Cancel')}<button class="btn btn--solid" type="submit">Save link</button></div></form>`;
 }
@@ -57,7 +58,7 @@ function linksTab() {
   const rows = cfg.links.map((l, i) => editing?.kind === 'link' && editing.id === l.id
     ? `<li class="item item--edit">${linkForm(l)}</li>`
     : `<li class="item"><span class="item__icon">${ico(l.icon)}</span>
-        <div class="item__main"><b>${esc(l.name)}</b>${l.pinned ? '<span class="chip chip--new">Pinned</span>' : ''}${l.is_primary ? '<span class="chip chip--new">Highlighted</span>' : ''}${l.show_guest ? '<span class="chip chip--vinyl">Guest</span>' : ''}${l.tier === 'more' ? '<span class="chip">Expanded only</span>' : ''}${l.for_media ? '<span class="chip chip--vinyl">Media view</span>' : ''}${l.for_music ? '<span class="chip chip--vinyl">Companion view</span>' : ''}
+        <div class="item__main"><b>${esc(l.name)}</b>${l.pinned ? '<span class="chip chip--new">Pinned</span>' : ''}${l.is_primary ? '<span class="chip chip--new">Highlighted</span>' : ''}${l.show_guest ? '<span class="chip chip--vinyl">Guest</span>' : ''}${l.tier === 'more' ? '<span class="chip">Expanded only</span>' : ''}${l.for_media ? '<span class="chip chip--vinyl">Media view</span>' : ''}${l.for_music ? '<span class="chip chip--vinyl">Companion view</span>' : ''}${l.for_sql ? '<span class="chip chip--vinyl">SQL DB view</span>' : ''}
           <div class="item__sub">${esc(l.subtitle)}${l.subtitle ? ' · ' : ''}${esc(l.url)}</div></div>
         <div class="item__acts">
           ${act('pin-link', ico('pin'), `data-id="${l.id}" data-to="${!l.pinned}" aria-label="${l.pinned ? 'Unpin' : 'Pin to top'}" title="${l.pinned ? 'Unpin' : 'Pin to top'}"`, `btn--icon${l.pinned ? ' is-pinned' : ''}`)}
@@ -223,6 +224,18 @@ function vinylCard() {
       <div id="shops"><div class="field__l" style="display:grid;grid-template-columns:minmax(110px,1fr) minmax(200px,2fr) minmax(110px,1fr);gap:10px;padding:0 0 6px"><span>Store</span><span>Address</span><span>Pre-order collection / Juno sections</span></div>${s.shops.map(shopRow).join('')}</div>
       <div class="bar-actions" style="padding:10px 0 4px">${act('add-shop', `${ico('play')}Add store`, '', 'btn--go')}</div>
       <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="vinyl"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
+function purchasesCard() {
+  return card('Vinyl pre-orders — add a purchase', 'Bought a record somewhere this app doesn’t watch — a shop, a gig, secondhand? Add it by hand; it appears in <b>Confirmed Pre-orders</b> on the Vinyl radar tile alongside anything bought straight from a tracked store. Editing the date later (e.g. once a TBC release is announced) or removing it once it arrives is done from that tile, not here.',
+    `<form class="form" data-form="purchase" style="padding:0 18px 12px"><div class="form-grid">
+      ${field('Artist', input('artist', '', 'required maxlength="80"'))}
+      ${field('Title', input('title', '', 'required maxlength="200"'))}
+      ${field('Variant (optional)', input('variant', '', 'maxlength="120" placeholder="e.g. Ltd. clear vinyl"'))}
+      ${field('Release date (optional — leave blank if TBC)', input('date', '', 'type="date"'))}
+      ${field('Store/product page link (optional)', input('product_url', '', 'type="url" placeholder="https://…"'), '', 'wide')}
+      ${field('Cover image address (optional)', input('image_url', '', 'type="url" placeholder="https://…"'), '', 'wide')}
+      </div><div class="form-actions"><button class="btn btn--solid" type="submit">Add purchase</button></div></form>`);
 }
 
 function radarCard() {
@@ -402,7 +415,7 @@ function aboutTab() {
 // ---- rendering ---------------------------------------------------------------------------------------------------
 function render() {
   $('#tabs').innerHTML = TABS.map(([id, label, icon]) => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}"${id === 'maintenance' && needsAttention() ? ' class="has-attn"' : ''}>${ico(icon)}${esc(label)}</button>`).join('');
-  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => binsCard() + diaryCard(), music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + radarCard(), news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
+  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => binsCard() + diaryCard(), music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
 }
 
 async function load() {
@@ -516,7 +529,7 @@ panel.addEventListener('submit', e => {
   const f = e.target, kind = f.dataset.form;
   if (kind === 'link') {
     const body = { name: val(f, 'name'), subtitle: val(f, 'subtitle'), url: val(f, 'url'), icon: val(f, 'icon'), health_url: val(f, 'health_url') || null,
-      is_primary: on(f, 'is_primary'), show_guest: on(f, 'show_guest'), tier: on(f, 'more') ? 'more' : 'main', pinned: on(f, 'pinned'), for_media: on(f, 'for_media'), for_music: on(f, 'for_music') };
+      is_primary: on(f, 'is_primary'), show_guest: on(f, 'show_guest'), tier: on(f, 'more') ? 'more' : 'main', pinned: on(f, 'pinned'), for_media: on(f, 'for_media'), for_music: on(f, 'for_music'), for_sql: on(f, 'for_sql') };
     const id = f.dataset.id;
     run(async () => { await (id ? api.put(`/api/owner/links/${id}`, body) : api.post('/api/owner/links', body)); editing = null; }, 'Link saved');
   } else if (kind === 'project') {
@@ -546,6 +559,9 @@ panel.addEventListener('submit', e => {
     const body = { artist: val(f, 'artist'), date: val(f, 'date'), venue: val(f, 'venue'), city: val(f, 'city'), doors: val(f, 'doors'), ticket_url: val(f, 'ticket_url') || null, notes: val(f, 'notes') };
     const id = f.dataset.id;
     run(async () => { await (id ? api.put(`/api/owner/gigs/${id}`, body) : api.post('/api/owner/gigs', body)); editing = null; }, 'Gig saved');
+  } else if (kind === 'purchase') {
+    const body = { artist: val(f, 'artist'), title: val(f, 'title'), variant: val(f, 'variant'), date: val(f, 'date') || null, image_url: val(f, 'image_url') || null, product_url: val(f, 'product_url') || null };
+    run(async () => { await api.post('/api/owner/vinyl/preorders', body); }, 'Added — see Confirmed Pre-orders on Vinyl radar');
   } else if (kind === 'artist-add') {
     run(async () => { await api.post('/api/owner/artists', { name: val(f, 'name') }); }, 'Following — checking for new music');
   } else if (kind === 'releases') {

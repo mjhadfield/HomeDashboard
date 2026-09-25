@@ -1,7 +1,7 @@
 /* Owner dashboard layout: icon rail + top bar + alert strip + 12-col card grid.
    Phone: single column with a bottom tab bar. */
 
-.shell { display: grid; grid-template-columns: 72px 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 88px 1fr; min-height: 100vh; }
 
 /* ---- Rail --------------------------------------------------------------- */
 .rail {
@@ -9,14 +9,23 @@
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 18px 0;
   border-right: 1px solid var(--edge);
-  background: linear-gradient(180deg, rgba(21, 16, 33, .6), rgba(7, 6, 10, .6));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 60%, transparent), color-mix(in srgb, var(--bg) 60%, transparent));
 }
-.rail__logo { color: var(--accent-hi); margin-bottom: 18px; filter: drop-shadow(0 0 10px rgba(168, 85, 247, .5)); }
+.rail__logo { color: var(--accent-hi); margin-bottom: 18px; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent-hi) 50%, transparent)); }
 .rail__logo .i { width: 30px; height: 30px; }
 .rail a { position: relative; display: grid; place-items: center; width: 44px; height: 44px; color: var(--silver-mute); transition: color .2s; }
 .rail a:hover { color: var(--silver-hi); }
 .rail a[aria-current] { color: var(--accent-soft); }
 .rail a[aria-current]::before { content: ""; position: absolute; left: -14px; top: 10px; bottom: 10px; width: 2px; background: var(--accent-hi); box-shadow: 0 0 10px var(--accent-hi); }
+/* Nav destinations get a text label under the icon, same idea as .tabbar below — the logo stays icon-only,
+   Settings (a real page nav, not a client-side view — no data-view) is styled via its own class instead. */
+.rail a[data-view], .rail a.rail__settings {
+  width: auto; height: auto; min-width: 60px;
+  gap: 4px; padding: 8px 4px;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase;
+}
+.rail a[data-view] .i, .rail a.rail__settings .i { width: 24px; height: 24px; }
+.rail__label { line-height: 1.2; }
 .rail .spacer { flex: 1; }
 
 /* ---- Main --------------------------------------------------------------- */
@@ -29,6 +38,8 @@
 #view-media.is-active { height: min(70vh, 560px); }
 #view-music { position: relative; }
 #view-music.is-active { height: min(70vh, 560px); }
+#view-sql { position: relative; }
+#view-sql.is-active { height: min(70vh, 560px); }
 /* Same chamfered, hairline-gradient-border shell as .card (components.css) — an iframe can't carry
    ::before/::after itself, so the shell is a real wrapper element around it instead. This only reaches
    the iframe's own border/frame; whatever renders *inside* it (Jellyfin's or Companion's own UI, incl.
@@ -37,7 +48,7 @@
   position: absolute; inset: 0;
   display: flex;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(201, 206, 214, 0.30), rgba(139, 92, 246, 0.20) 45%, rgba(201, 206, 214, 0.09));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--silver) 30%, transparent), color-mix(in srgb, var(--accent) 20%, transparent) 45%, color-mix(in srgb, var(--silver) 9%, transparent));
   clip-path: polygon(0 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer), 100% 100%, var(--chamfer) 100%, 0 calc(100% - var(--chamfer)));
 }
 .frame-shell iframe { flex: 1; width: 100%; height: 100%; border: 0; background: var(--surface); }
@@ -55,7 +66,7 @@
   display: flex; align-items: center; gap: 12px;
   padding: 10px 14px;
   border: 1px solid var(--edge-strong);
-  background: linear-gradient(90deg, rgba(139, 92, 246, .16), rgba(139, 92, 246, .03));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 3%, transparent));
 }
 .alert .i { color: var(--accent-soft); width: 20px; height: 20px; }
 .alert b { color: var(--silver-hi); font-weight: 600; }
@@ -77,12 +88,12 @@
 .bin__swatch { width: 4px; align-self: stretch; border-radius: 1px; background: var(--sw, var(--silver-dim)); box-shadow: 0 0 10px color-mix(in srgb, var(--sw) 50%, transparent); }
 .bin__name { font-weight: 600; color: var(--silver-hi); }
 .bin__when { margin-left: auto; text-align: right; font-family: var(--font-mono); font-size: 12px; color: var(--silver-mute); }
-.bin--due { background: linear-gradient(90deg, rgba(139, 92, 246, .14), transparent); }
+.bin--due { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent); }
 
 /* ---- Next gig hero ------------------------------------------------------ */
 .hero { display: flex; align-items: flex-end; gap: 16px; }
 .hero__count { font-family: var(--font-mono); font-weight: 700; font-size: 64px; line-height: .9; color: transparent;
-  background: linear-gradient(180deg, #fff, #9aa1ad); -webkit-background-clip: text; background-clip: text; }
+  background: linear-gradient(180deg, var(--silver-hi), var(--silver-mute)); -webkit-background-clip: text; background-clip: text; }
 .hero__unit { font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em; color: var(--accent-soft); text-transform: uppercase; padding-bottom: 6px; }
 .hero__name { font-size: 22px; font-weight: 700; color: var(--silver-hi); margin-top: 10px; letter-spacing: .02em; }
 .hero__sub { color: var(--silver-mute); font-size: 14px; margin-bottom: 14px; }
@@ -112,7 +123,7 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .tile b { display: block; font-weight: 600; color: var(--silver-hi); line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 10.5px; color: var(--silver-dim); }
 .tile .dot { margin-left: auto; }
-.tile--primary { border-color: var(--edge-strong); background: linear-gradient(135deg, rgba(139, 92, 246, .18), rgba(139, 92, 246, .04)); }
+.tile--primary { border-color: var(--edge-strong); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent) 4%, transparent)); }
 
 /* ---- Feed items (releases / radar / news) ------------------------------- */
 .tabs { display: inline-flex; gap: 2px; }
@@ -132,7 +143,7 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .pane[hidden] { display: none; }
 
 .news { display: block; padding: 8px 16px; }
-.news:hover .news__title { color: #fff; }
+.news:hover .news__title { color: var(--silver-hi); }
 .news__src { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-soft); }
 .news__title { color: var(--silver-hi); font-weight: 500; line-height: 1.3; transition: color .2s; }
 .news__age { font-family: var(--font-mono); font-size: 11px; color: var(--silver-dim); margin-left: 8px; }
@@ -142,7 +153,7 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .bar__top { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 12px; margin-bottom: 6px; color: var(--silver-mute); }
 .bar__top b { color: var(--silver-hi); font-weight: 400; }
 .bar__track { position: relative; height: 6px; background: var(--surface-3);
-  background-image: repeating-linear-gradient(90deg, transparent 0 9px, rgba(7, 6, 10, .8) 9px 10px); }
+  background-image: repeating-linear-gradient(90deg, transparent 0 9px, color-mix(in srgb, var(--bg) 80%, transparent) 9px 10px); }
 .bar__fill { position: absolute; inset: 0 auto 0 0; width: var(--v); background: linear-gradient(90deg, var(--accent-deep), var(--accent-hi)); }
 .bar__fill--hot { background: linear-gradient(90deg, #7c2d12, var(--warn)); }
 
@@ -202,10 +213,10 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
   .feed__date { min-width: 0; text-align: left; }
   .meta--opt { display: none; }
   .tabbar {
-    display: grid; grid-template-columns: repeat(4, 1fr);
+    display: grid; grid-template-columns: repeat(5, 1fr);
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
     padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
-    background: rgba(9, 7, 14, .92); backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg-2) 92%, transparent); backdrop-filter: blur(10px);
     border-top: 1px solid var(--edge-strong);
   }
   .tabbar a { display: grid; justify-items: center; gap: 2px; padding: 4px 0; color: var(--silver-mute); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
@@ -236,7 +247,7 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .svc { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--edge); }
 .svc .mono { margin-left: auto; font-size: 12px; }
 .logwrap { padding: 12px 16px 16px; }
-.log { margin: 8px 0 0; padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--silver-mute); background: rgba(0, 0, 0, .35); border: 1px solid var(--edge); overflow: auto; }
+.log { margin: 8px 0 0; padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--silver-mute); background: var(--well); border: 1px solid var(--edge); overflow: auto; }
 
 /* ==========================================================================
    Card chrome: header tools, scroll fade, expand-only toolbar
@@ -252,22 +263,22 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .fchip[aria-pressed="true"] { color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); }
 .fchip:disabled { cursor: default; opacity: .5; }
 .fchip:disabled:hover { color: var(--silver-mute); border-color: var(--edge); }
-.search { margin-left: auto; min-width: 200px; padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: rgba(0, 0, 0, .35); border: 1px solid var(--edge); }
+.search { margin-left: auto; min-width: 200px; padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: var(--well); border: 1px solid var(--edge); }
 .search::placeholder { color: var(--silver-dim); }
 .news__toolbar { border-bottom: 1px solid var(--edge); margin-bottom: 4px; }
-.news__source { padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: rgba(0, 0, 0, .35); border: 1px solid var(--edge); }
-.news__source option { background: #14102a; }
+.news__source { padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: var(--well); border: 1px solid var(--edge); }
+.news__source option { background: var(--surface-3); }
 
 /* ==========================================================================
    Expanded card (maximised)
    ========================================================================== */
 body.has-max { overflow: hidden; }
-body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; background: rgba(5, 4, 8, .80); backdrop-filter: blur(8px); }
+body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(8px); }
 .card.is-max {
   position: fixed; z-index: 90; --c: 22px;
   inset: clamp(16px, 4vh, 56px) clamp(16px, 5vw, 120px);
   max-width: 1900px; margin-inline: auto;
-  background: linear-gradient(135deg, rgba(201, 206, 214, .38), rgba(168, 85, 247, .5) 45%, rgba(201, 206, 214, .14));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--silver) 38%, transparent), color-mix(in srgb, var(--accent-hi) 50%, transparent) 45%, color-mix(in srgb, var(--silver) 14%, transparent));
 }
 .card.is-max .card__head { cursor: default; padding: 16px 24px 0; }
 .card.is-max .card__in::before { margin-left: 24px; width: 56px; }
@@ -306,6 +317,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
   #view-news .card { flex: 1; min-height: 0; }
   #view-media.is-active { height: auto; }
   #view-music.is-active { height: auto; }
+  #view-sql.is-active { height: auto; }
   .grid {
     min-height: 0; grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, .95fr);
     grid-template-areas:
@@ -341,7 +353,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .cd b { font-weight: 400; }
 .cd--out { border: 0; }
 .cd--past { opacity: .35; }
-.cd--today { color: #fff; border-color: var(--accent-hi); box-shadow: 0 0 14px rgba(168, 85, 247, .35); }
+.cd--today { color: var(--silver-hi); border-color: var(--accent-hi); box-shadow: 0 0 14px color-mix(in srgb, var(--accent-hi) 35%, transparent); }
 .cd i { display: block; width: 70%; height: 3px; background: var(--sw); box-shadow: 0 0 6px color-mix(in srgb, var(--sw) 50%, transparent); }
 
 /* expanded: collection rows become tiles beneath the calendars */
@@ -420,7 +432,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .pinbtn.is-on .i { fill: currentColor; }
 .tilewrap .pinbtn { position: absolute; top: 4px; right: 14px; z-index: 1; }
 .tilewrap:hover .pinbtn, .proj:hover .pinbtn, .pinbtn:focus-visible { opacity: 1; }
-.tile--pinned { border-color: rgba(168, 85, 247, .32); }
+.tile--pinned { border-color: color-mix(in srgb, var(--accent-hi) 32%, transparent); }
 @media (hover: none) { .pinbtn { opacity: .55; } .pinbtn.is-on { opacity: 1; } }
 
 
@@ -428,11 +440,11 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
    Content cards (releases, vinyl, radar, headlines, gigs)
    ========================================================================== */
 .feed__link { color: inherit; transition: color .2s; }
-.feed__link:hover { color: #fff; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.feed__link:hover { color: var(--silver-hi); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
 /* A new item needs to read as "unseen" at a glance in a list of ten — a brighter, glowing edge than a pin gets (pin is
    a quieter, permanent marker), plus a tinted wash across the whole row, not just a hairline. (A row is only ever one
    status at a time — pinning something moves it off 'new' — so this and .feed--pinned below never both apply.) */
-.feed--new { box-shadow: inset 3px 0 0 var(--accent-hi), 0 0 20px -12px var(--accent-hi); background: linear-gradient(90deg, rgba(168, 85, 247, .13), transparent 55%); }
+.feed--new { box-shadow: inset 3px 0 0 var(--accent-hi), 0 0 20px -12px var(--accent-hi); background: linear-gradient(90deg, color-mix(in srgb, var(--accent-hi) 13%, transparent), transparent 55%); }
 .feed--news { align-items: flex-start; }
 .feed--news .feed__meta { align-self: center; }
 .feed__title--wrap { white-space: normal; line-height: 1.3; }
@@ -464,14 +476,14 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .feed__acts .btn { opacity: 0; transition: opacity .2s, color .2s, border-color .2s, background .2s, box-shadow .2s; }
 .feed:hover .feed__acts .btn, .feed:focus-within .feed__acts .btn, .card.is-max .feed__acts .btn { opacity: 1; }
 @media (max-width: 760px), (hover: none) { .feed__acts .btn { opacity: .75; } }
-.feed__acts .btn.is-pinned { opacity: 1; color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); box-shadow: 0 0 12px rgba(139, 92, 246, .35); }
+.feed__acts .btn.is-pinned { opacity: 1; color: var(--accent-soft); border-color: var(--edge-strong); background: var(--accent-wash); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent); }
 .feed__acts .btn.is-pinned .i { fill: currentColor; }
-.feed--pinned { box-shadow: inset 2px 0 0 var(--accent-soft); background: linear-gradient(90deg, rgba(196, 181, 253, .09), transparent 40%); }
+.feed--pinned { box-shadow: inset 2px 0 0 var(--accent-soft); background: linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 9%, transparent), transparent 40%); }
 
 /* ---- Vinyl radar tiles ------------------------------------------------------------------------------------------ */
 /* Artist and album each get their own line and may wrap (two lines), so a long name like "Queens Of The Stone Age" is never cut
    short. Facts sit beneath; the date is small, right-aligned DD/MM/YYYY. The actions keep their room in the right-hand column. */
-.cover__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0b0910; }
+.cover__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--bg-2); }
 .feed--vinyl { gap: 14px; padding: 12px 16px; }
 .feed--vinyl .cover { width: 64px; height: 64px; font-size: 22px; }
 .vin__artist, .vin__album { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
@@ -484,7 +496,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .vin__eds { margin-top: 8px; display: grid; gap: 2px; }
 .vin__ed { display: flex; justify-content: space-between; gap: 14px; font-size: 12.5px; color: var(--silver); padding: 3px 0; border-top: 1px solid var(--edge); }
 .vin__ed b { font-family: var(--font-mono); font-weight: 500; color: var(--silver-hi); white-space: nowrap; }
-.vin__ed:hover { color: #fff; }
+.vin__ed:hover { color: var(--silver-hi); }
 .vin__label { font-size: 12px; color: var(--silver-mute); padding-top: 4px; }
 .card.is-max .feed--vinyl { padding: 16px 24px; }
 .card.is-max .feed--vinyl .cover { width: 88px; height: 88px; font-size: 28px; }
@@ -496,4 +508,37 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
   .feed--vinyl .feed__main { flex-basis: calc(100% - 80px); }
   .feed--vinyl .feed__meta { flex-direction: row; align-items: center; justify-content: space-between; padding-left: 78px; }
   .feed--vinyl .vin__when { text-align: left; }
+}
+
+/* "Also at" per-store tooltip — same opacity/hover-reveal technique as .feed__acts above, just the first
+   custom tooltip in this app (native title="" isn't rich enough for a pressing name + price). */
+.vin__also { position: relative; display: inline-block; }
+.vin__also-link { text-decoration: underline; text-decoration-color: var(--edge-strong); text-underline-offset: 2px; }
+.vin__also-tip {
+  position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%);
+  padding: 5px 9px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px; color: var(--silver-hi);
+  background: var(--surface-3); border: 1px solid var(--edge-strong);
+  opacity: 0; pointer-events: none; transition: opacity .15s;
+  z-index: 5;
+}
+.vin__also:hover .vin__also-tip, .vin__also-link:focus + .vin__also-tip { opacity: 1; }
+
+/* Confirmed Pre-orders rows — a slimmer sibling of .feed--vinyl (no editions expando, a countdown badge and
+   an inline release-date field instead). Two lines, not three: badge+date share a line, Received+Remove share
+   the one below — .feed__meta stays a column of exactly those two .preorder__row lines. */
+.feed--preorder { gap: 14px; padding: 10px 16px; }
+.feed--preorder .cover { width: 56px; height: 56px; font-size: 20px; }
+.feed--preorder .feed__meta { flex-direction: column; align-items: flex-end; gap: 6px; }
+.preorder__row { display: flex; align-items: center; gap: 8px; }
+.card.is-max .feed--preorder { padding: 14px 24px; }
+.card.is-max .feed--preorder .cover { width: 76px; height: 76px; font-size: 24px; }
+.preorder-date {
+  font-family: var(--font-mono); font-size: 11px; color: var(--silver-hi);
+  padding: 5px 8px; background: var(--well); border: 1px solid var(--edge);
+}
+@media (max-width: 760px) {
+  .feed--preorder .feed__main { flex-basis: calc(100% - 72px); }
+  .feed--preorder .feed__meta { flex-direction: column; align-items: flex-start; width: 100%; padding-left: 70px; }
+  .preorder__row { width: 100%; justify-content: space-between; }
 }

@@ -27,11 +27,15 @@ for _noisy in ("httpx", "httpcore"):
 # load-balanced storage nodes (iaNNNNNN.us.archive.org, which one varies and isn't a fixed list) — verified
 # live, not guessed. The browser enforces img-src against that final URL, so a wildcard subdomain is the only
 # workable allowlist here, even though every image is only ever *linked* from coverartarchive.org itself.
-# frame-src is Jellyfin (Media page) and Music Companion (Companion page) — fixed addresses, hardcoded here
-# the same way the image hosts above are; if either changes in Settings, this needs a matching edit.
+# frame-src is Jellyfin (Media page), Music Companion (Companion page) and the Music DB Explorer (SQL DB page) —
+# fixed addresses, hardcoded here the same way the image hosts above are; if any changes in Settings, this needs
+# a matching edit. :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
+# own pages ever creates an iframe pointed at it directly -- Companion's own settings-icon link navigates the
+# *existing* #music-frame iframe to it, and frame-src also governs subsequent navigations of a nested browsing
+# context, not just its initial src.
 CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://coverartarchive.org https://archive.org https://*.archive.org; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
 
 class NoCacheStatic(StaticFiles):
@@ -101,6 +105,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Citadel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", NoCacheStatic(directory=config.WEB_DIR), name="static")
+# Manually-added purchases' cover images (vinyl.fetch_manual_cover) — fetched once server-side and served
+# same-origin, rather than hotlinked, since the CSP's img-src below only allows a fixed set of CDNs. The
+# directory is created lazily on first use, so check_dir=False avoids a startup dependency on it existing yet.
+(config.DATA_DIR / "covers").mkdir(parents=True, exist_ok=True)
+app.mount("/covers", NoCacheStatic(directory=config.DATA_DIR / "covers"), name="covers")
 
 
 @app.middleware("http")

@@ -44,6 +44,8 @@ function acts(it) {
 }
 
 const link = (it, text, attrs = '') => `<a class="feed__link" href="${esc(safeUrl(it.url))}" target="_blank" rel="noopener"${attrs}>${esc(text)}</a>`;
+/** "Artist — Title", or just the title for anything without one — used in confirmation prompts, so the dialog names the actual record. */
+const rowName = it => esc(it.artist ? `${it.artist} — ${it.title}` : it.title);
 
 function musicRow(it, k, hide) {
   const more = hide;
@@ -60,6 +62,9 @@ function thumb(url) {
   if (!ART_HOSTS.test(url || '')) return '';
   try { const u = new URL(url); if (u.hostname === 'cdn.shopify.com') u.searchParams.set('width', '192'); return u.href; } catch { return ''; }
 }
+// A manually-added purchase's cover is fetched server-side once and served same-origin (see vinyl.fetch_manual_cover)
+// rather than hotlinked, so it's a plain relative path — no resize param, no ART_HOSTS check needed.
+const cover = url => (url || '').startsWith('/covers/') ? url : thumb(url);
 // A picture that fails to load (blocked, moved, offline) is removed so the lettered tile underneath shows instead.
 document.addEventListener('error', e => { if (e.target instanceof HTMLImageElement && e.target.classList.contains('cover__img')) e.target.remove(); }, true);
 
@@ -71,7 +76,9 @@ function vinylRow(it, k, hide) {
   const [when, day] = it.date ? ['releases', fmtDMY(it.date)] : m.listed ? ['listed', fmtDMY(m.listed)] : ['date', 'TBC'];
   const many = m.variants > 1;
   const facts = [m.format, many ? `${m.variants} variants` : '', m.price ? `${many ? 'from ' : ''}${m.price}` : '', m.shop].filter(Boolean).map(esc).join(' · ');
-  const also = (m.also || []).length ? `<div class="vin__label">Also at ${m.also.map(esc).join(', ')}</div>` : '';
+  // Each "also at" store gets its own hover tooltip (pressing name + price) and links straight to that store's
+  // own product page — not just the primary listing's. CSS-only hover reveal, same technique as .feed__acts.
+  const also = (m.also || []).length ? `<div class="vin__label">Also at ${m.also.map(a => `<span class="vin__also"><a class="vin__also-link" href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener">${esc(a.shop)}</a><span class="vin__also-tip" role="tooltip">${esc(a.name)}${a.price ? ` · ${esc(a.price)}` : ''}</span></span>`).join(', ')}</div>` : '';
   const eds = (m.editions || []).length
     ? `<div class="vin__eds more" hidden>${m.editions.map(e => `<a class="vin__ed" href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener"><span>${esc(e.name)}</span><b>${esc(e.price)}</b></a>`).join('')}${m.label ? `<div class="vin__label">Label · ${esc(m.label)}</div>` : ''}${also}</div>`
     : (m.label || also ? `<div class="vin__eds more" hidden>${m.label ? `<div class="vin__label">Label · ${esc(m.label)}</div>` : ''}${also}</div>` : '');
@@ -82,7 +89,22 @@ function vinylRow(it, k, hide) {
       <div class="vin__album" title="${esc(it.title)}">${link(it, it.title)}</div>
       <div class="vin__facts">${facts}</div>${eds}</div>
     <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}
-      <div class="vin__when"><small>${when}</small>${esc(day)}</div>${acts(it)}</div></li>`;
+      <div class="vin__when"><small>${when}</small>${esc(day)}</div>${vinylActs(it)}</div></li>`;
+}
+
+// Vinyl-only row actions: no per-row artist-mute (Settings → Music's artist list still has one), a Purchased
+// tick instead — moves it to Confirmed Pre-orders (see vinylUi/preorderList below). A copy of the shared acts(),
+// not a shared-function change, since no other card needs this swap.
+function vinylActs(it) {
+  if (it.status === 'dismissed') {
+    return `<div class="feed__acts feed__acts--wide"><button class="btn" data-item-act="restore" data-id="${it.id}" data-to="seen">Restore</button></div>`;
+  }
+  const pinned = it.status === 'pinned';
+  const seen = it.status === 'new' ? `<button class="btn btn--icon" data-item-act="seen" data-id="${it.id}" data-to="seen" aria-label="Mark as seen" title="Mark as seen — clears the New highlight">${ico('check')}</button>` : '';
+  return `<div class="feed__acts">${seen}
+    <button class="btn btn--icon" data-item-act="dismiss" data-id="${it.id}" data-to="dismissed" aria-label="Dismiss" title="Dismiss">${ico('x')}</button>
+    <button class="btn btn--icon" data-item-act="purchased" data-id="${it.id}" data-to="purchased" data-title="${rowName(it)}"${it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? ` data-release-date="${esc(it.date)}"` : ''} aria-label="Mark purchased" title="Mark purchased — moves it to Confirmed Pre-orders">${ico('check')}</button>
+    <button class="btn btn--icon${pinned ? ' is-pinned' : ''}" data-item-act="pin" data-id="${it.id}" data-to="${pinned ? 'seen' : 'pinned'}" aria-label="${pinned ? 'Unpin' : 'Pin'}" aria-pressed="${pinned}" title="${pinned ? 'Unpin' : 'Pin to top'}">${ico('pin')}</button></div>`;
 }
 
 function plainRow(it, k, hide) {                              // no cover: gig radar
@@ -147,8 +169,55 @@ function releases(s, ctx) {
     emptyIcon: 'disc', emptyTitle: 'No new albums yet', emptyText: `Watching ${w.data?.following ?? 0} artists for new studio albums.`, unit: 'albums · musicbrainz', compact: LONG });
 }
 
-// ---- Vinyl radar: records you can pre-order --------------------------------------------------------------------------
+// ---- Vinyl radar: records you can pre-order, and what's already been bought ----------------------------------------
+
+// Dual-content tile: the header itself has two clickable segments ("Vinyl Radar" / "Confirmed Pre-orders") that swap
+// the whole body, News's newsUi-style bolt-on state rather than an extension to Shell's shared per-card state
+// (filter/search only, used by every other grid card too) — this is a plain two-value enum, nothing dynamic like
+// News's live source/tag options, so it doesn't need a generic mechanism.
+export const vinylUi = { mode: 'radar' };
+
+function vinylHeader() {
+  return `<button type="button" class="hud__seg" data-vinyl-mode="radar" aria-pressed="true">Vinyl Radar</button>` +
+         `<button type="button" class="hud__seg" data-vinyl-mode="preorders" aria-pressed="false">Confirmed Pre-orders</button>`;
+}
+
+// Once release day arrives, "3d ago"-style ageing stops being useful — it's not late, it just hasn't been
+// acknowledged yet — so day 0 and every day after both read as one open-ended "still waiting" state.
+const daysBadge = n => n == null ? '<span class="chip">TBC</span>' : n <= 0 ? '<span class="chip chip--fresh">Any moment!</span>' : `<span class="chip chip--fresh">${esc(relDays(n))}</span>`;
+
+function preorderRow(it) {
+  const m = it.meta || {};
+  const art = cover(m.image);
+  // A store link survives onto a purchased row two ways: it's already the keeper row's own url when bought
+  // straight off the radar, or it's whatever was typed into the manual-purchase form in Settings. Either way,
+  // no url just means plain text — a link to "#" would look clickable and do nothing.
+  const hasUrl = !!it.url;
+  const name = rowName(it);
+  return `<li class="feed feed--preorder">
+    <span class="cover cover--art ${COVERS[0]}">${esc(initial(it.artist || it.title))}${art ? `<img class="cover__img" src="${esc(art)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>
+    <div class="feed__main">
+      <div class="vin__artist" title="${esc(it.artist || '')}">${it.artist ? (hasUrl ? link(it, it.artist) : esc(it.artist)) : ''}</div>
+      <div class="vin__album" title="${esc(it.title)}">${hasUrl ? link(it, it.title) : esc(it.title)}</div>
+      <div class="vin__facts">${esc(m.variant || m.format || '')}</div></div>
+    <div class="feed__meta">
+      <div class="preorder__row">${daysBadge(it.in_days)}
+        <input type="date" class="preorder-date" data-preorder-date="${it.id}" value="${it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : ''}" aria-label="Release date — leave blank if TBC"></div>
+      <div class="preorder__row">
+        <button class="btn" data-item-act="received" data-id="${it.id}" data-title="${name}">Received</button>
+        <button class="btn" data-item-act="remove" data-id="${it.id}" data-title="${name}">Remove</button></div></div></li>`;
+}
+
+function preorderList(s) {
+  const list = s.widgets.vinyl.data?.preorders || [];
+  if (!list.length) {
+    return { meta: '0 confirmed', body: empty('disc', 'No confirmed pre-orders yet', "Mark a pre-order as Purchased on the radar, or add one bought elsewhere in Settings → Music.", settingsLink('Add a purchase')) };
+  }
+  return { meta: `${list.length} confirmed`, body: `<ul class="rows rows--cols">${list.map(preorderRow).join('')}</ul>` };
+}
+
 function vinyl(s, ctx) {
+  if (vinylUi.mode === 'preorders') return preorderList(s);
   const w = s.widgets.vinyl, d = w.data;
   const hint = d ? `<div class="note more" hidden>Pre-orders from ${d.stores} label and record stores, matched to the artists you follow. Release dates are shown where a store gives one; otherwise when the pre-order was listed. Manage stores in <a href="/settings#music">Settings → Music</a>.${d.errors?.length ? ` Couldn’t read: ${esc(d.errors.join(', '))}.` : ''}</div>` : '';
   return feedCard(s, ctx, {
@@ -255,7 +324,7 @@ export const contentCards = [
     filters: [{ label: 'Upcoming', value: 'upcoming' }, { label: 'Past', value: 'past' }, { label: 'All', value: 'all' }], defaultFilter: 'upcoming' },
   { id: 'releases', area: 'rel', label: 'Releases', flush: true, render: releases, search: true, markSeen: 'release',
     filters: [...CURATE, { label: 'Upcoming', value: 'upcoming' }, DISMISSED] },
-  { id: 'vinyl', area: 'vin', label: 'Vinyl radar', flush: true, render: vinyl, search: true, markSeen: 'vinyl',
+  { id: 'vinyl', area: 'vin', label: vinylHeader(), labelHtml: true, flush: true, render: vinyl, markSeen: 'vinyl',
     filters: [...CURATE, { label: 'Has date', value: 'dated' }, DISMISSED] },
   { id: 'radar', area: 'radar', label: 'Gig radar', flush: true, render: radar, search: true, markSeen: 'radar', filters: [...CURATE, { label: 'Tributes', value: 'tribute' }, DISMISSED] },
 ];

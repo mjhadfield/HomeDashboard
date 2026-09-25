@@ -15,10 +15,11 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .db import db
 
-STATUSES = ("new", "seen", "pinned", "dismissed")
+STATUSES = ("new", "seen", "pinned", "dismissed", "purchased")
 ARTIST_STATUSES = ("follow", "pin", "mute")
 CHECK_COLUMNS = ("mb_checked_at", "vinyl_checked_at", "radar_checked_at")     # whitelist: these are interpolated into SQL
 
@@ -78,10 +79,10 @@ def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baselin
 
 
 def prune(kind: str, *, older_than_days: int) -> int:
-    """Forget items we haven't seen for a while — except pinned ones."""
+    """Forget items we haven't seen for a while — except pinned or purchased ones."""
     cutoff = int(time.time()) - older_than_days * 86400
     with db() as con:
-        return con.execute("DELETE FROM feed_items WHERE kind = ? AND last_seen < ? AND status != 'pinned'", (kind, cutoff)).rowcount
+        return con.execute("DELETE FROM feed_items WHERE kind = ? AND last_seen < ? AND status NOT IN ('pinned', 'purchased')", (kind, cutoff)).rowcount
 
 
 def has_source(kind: str, source: str) -> bool:
@@ -91,10 +92,10 @@ def has_source(kind: str, source: str) -> bool:
 
 def drop_missing(kind: str, source: str, keep_ids: set[str]) -> int:
     """After a *successful* look at a source, forget its items that were not there this time (e.g. a pre-order that has
-    shipped or sold out). Pinned items are kept. Compared by id, not by clock, and never called after a failed fetch,
-    so an outage can't empty the card."""
+    shipped or sold out). Pinned or purchased items are kept. Compared by id, not by clock, and never called after a
+    failed fetch, so an outage can't empty the card."""
     with db() as con:
-        have = [r["external_id"] for r in con.execute("SELECT external_id FROM feed_items WHERE kind = ? AND source = ? AND status != 'pinned'", (kind, source))]
+        have = [r["external_id"] for r in con.execute("SELECT external_id FROM feed_items WHERE kind = ? AND source = ? AND status NOT IN ('pinned', 'purchased')", (kind, source))]
         gone = [e for e in have if e not in keep_ids]
         for e in gone:
             con.execute("DELETE FROM feed_items WHERE kind = ? AND source = ? AND external_id = ?", (kind, source, e))
@@ -126,6 +127,38 @@ def mark_read(item_id: int) -> bool:
             meta["read"] = True
             con.execute("UPDATE feed_items SET meta = ? WHERE id = ?", (json.dumps(meta), item_id))
     return True
+
+
+def list_purchased(kind: str) -> list[dict[str, Any]]:
+    """Confirmed pre-orders: everything marked Purchased, soonest release first (undated last) — same ordering
+    rule as everywhere else, via _ordered."""
+    with db() as con:
+        rows = con.execute("SELECT * FROM feed_items WHERE kind = ? AND status = 'purchased' ORDER BY last_seen DESC", (kind,)).fetchall()
+    return _ordered([_row_to_item(r) for r in rows], oldest_first=True)
+
+
+def add_manual_purchase(kind: str, *, artist: str, title: str, variant: str, date: str | None, image: str, url: str | None = None) -> int:
+    """A record bought somewhere this app doesn't watch, entered by hand — stored the same way as a scraped-then-
+    purchased item so Confirmed Pre-orders is one list regardless of where a record came from. Inserted directly
+    rather than through upsert_items(), which is shaped for a widget's own fetch cycle, not a one-off owner entry."""
+    now = int(time.time())
+    with db() as con:
+        cur = con.execute(
+            "INSERT INTO feed_items (kind, source, external_id, artist, title, subtitle, url, date, meta, status, first_seen, last_seen) "
+            "VALUES (?, 'manual', ?, ?, ?, '', ?, ?, ?, 'purchased', ?, ?)",
+            (kind, f"manual-{uuid4().hex}", artist[:300], title[:300], url, date, json.dumps({"variant": variant[:120], "image": image}), now, now),
+        )
+    return cur.lastrowid
+
+
+def set_date(item_id: int, date: str | None) -> bool:
+    with db() as con:
+        return con.execute("UPDATE feed_items SET date = ? WHERE id = ?", (date, item_id)).rowcount > 0
+
+
+def delete_item(item_id: int) -> bool:
+    with db() as con:
+        return con.execute("DELETE FROM feed_items WHERE id = ?", (item_id,)).rowcount > 0
 
 
 def _row_to_item(r: sqlite3.Row) -> dict[str, Any]:
@@ -165,7 +198,7 @@ def list_items(kind: str, *, oldest_first: bool = False, limit: int = 150, dismi
             "SELECT f.* FROM feed_items f LEFT JOIN followed_artists a ON a.name = f.artist COLLATE NOCASE "
             "WHERE f.kind = ? AND (a.status IS NULL OR a.status != 'mute') ORDER BY f.last_seen DESC LIMIT 1500", (kind,)).fetchall()
     items = [_row_to_item(r) for r in rows]
-    items = [i for i in items if not is_junk_artist(i["artist"]) and (keep is None or keep(i))]
+    items = [i for i in items if not is_junk_artist(i["artist"]) and i["status"] != "purchased" and (keep is None or keep(i))]
 
     if source_priority:                                       # the same album from two sources: keep the preferred one…
         rank = {s: i for i, s in enumerate(source_priority)}
@@ -175,12 +208,15 @@ def list_items(kind: str, *, oldest_first: bool = False, limit: int = 150, dismi
             if k not in best:
                 best[k] = it
                 continue
-            keeper = best[k]                                   # …but it learns what the others know: a release date it lacked, and where else it is sold
+            keeper = best[k]                                   # …but it learns what the others know: a release date it lacked, and everywhere else it's sold
             if not keeper["date"] and it["date"]:
                 keeper["date"] = it["date"]
             shop = it["meta"].get("shop")
-            if shop and shop != keeper["meta"].get("shop") and shop not in keeper["meta"].setdefault("also", []):
-                keeper["meta"]["also"].append(shop)
+            also = keeper["meta"].setdefault("also", [])
+            if shop and shop != keeper["meta"].get("shop") and not any(a["shop"] == shop for a in also):
+                eds = it["meta"].get("editions") or []          # this store's own pricing/pressing, kept rather than reduced to a bare name
+                also.append({"shop": shop, "name": eds[0]["name"] if eds else (it["meta"].get("format") or "Standard"),
+                             "price": eds[0]["price"] if eds else it["meta"].get("price", ""), "url": eds[0]["url"] if eds else it.get("url")})
         items = list(best.values())
 
     active = _ordered([i for i in items if i["status"] != "dismissed"], oldest_first)

@@ -89,7 +89,7 @@ async def project_logs(slug: str, n: int = 200):
 def _link_cfg(r: sqlite3.Row) -> dict[str, Any]:
     return {"id": r["id"], "name": r["name"], "subtitle": r["subtitle"], "url": r["url"], "icon": r["icon"],
             "health_url": r["health_url"] or "", "is_primary": bool(r["is_primary"]), "show_guest": bool(r["show_guest"]), "tier": r["tier"],
-            "pinned": r["pin_order"] is not None, "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"])}
+            "pinned": r["pin_order"] is not None, "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"])}
 
 
 def _project_cfg(r: sqlite3.Row) -> dict[str, Any]:
@@ -179,6 +179,16 @@ def _apply_for_music(con: sqlite3.Connection, link_id: Any, for_music: bool) -> 
     con.execute("UPDATE links SET for_music = 1 WHERE id = ?", (link_id,))
 
 
+def _apply_for_sql(con: sqlite3.Connection, link_id: Any, for_sql: bool) -> None:
+    """Same idea as _apply_for_media, for the SQL DB page's iframe — a separate column, so setting one
+    never touches the others."""
+    if not for_sql:
+        con.execute("UPDATE links SET for_sql = 0 WHERE id = ?", (link_id,))
+        return
+    con.execute("UPDATE links SET for_sql = 0 WHERE id != ?", (link_id,))
+    con.execute("UPDATE links SET for_sql = 1 WHERE id = ?", (link_id,))
+
+
 @router.post("/links", status_code=201)
 async def create_link(body: schemas.LinkIn, request: Request):
     with db.db() as con:
@@ -188,6 +198,7 @@ async def create_link(body: schemas.LinkIn, request: Request):
         _apply_pin(con, "links", "id", cur.lastrowid, body.pinned)
         _apply_for_media(con, cur.lastrowid, body.for_media)
         _apply_for_music(con, cur.lastrowid, body.for_music)
+        _apply_for_sql(con, cur.lastrowid, body.for_sql)
     notify.config()
     asyncio.create_task(request.app.state.health.sweep_now())
     return {"id": cur.lastrowid}
@@ -209,6 +220,7 @@ async def update_link(link_id: int, body: schemas.LinkIn, request: Request):
             _apply_pin(con, "links", "id", link_id, body.pinned)
             _apply_for_media(con, link_id, body.for_media)
             _apply_for_music(con, link_id, body.for_music)
+            _apply_for_sql(con, link_id, body.for_sql)
     if not n:
         raise HTTPException(404, "no such link")
     notify.config()

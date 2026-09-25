@@ -33,7 +33,7 @@ export class Shell {
     // nothing to expand into), and its filters/search start visible instead of hidden-until-expanded.
     const maxBtn = def.pinnedOpen ? '' : `<button class="btn btn--icon" data-max aria-label="Expand" aria-expanded="false">${ico('expand')}</button>`;
     el.innerHTML = `<div class="card__in">
-      <div class="card__head"><span class="hud">${esc(def.label)}</span><span class="card__tools"><span class="meta"></span>${headerAction}
+      <div class="card__head"><span class="hud">${def.labelHtml ? def.label : esc(def.label)}</span><span class="card__tools"><span class="meta"></span>${headerAction}
         ${maxBtn}</span></div>
       ${chips || search ? `<div class="maxbar"${def.pinnedOpen ? '' : ' hidden'}>${chips}${search}</div>` : ''}
       <div class="card__body${def.flush ? ' card__body--flush' : ''}"></div></div>`;

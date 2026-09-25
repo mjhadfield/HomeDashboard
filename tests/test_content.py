@@ -347,11 +347,21 @@ def test_a_leading_the_does_not_make_the_same_record_two_rows():
 
 def test_a_duplicate_lends_its_release_date_and_shop_name_to_the_preferred_row():
     content.upsert_items("vinyl", "shop-a", [item("1", artist="Saxon", title="Gods of Thunder", date=None, meta={"shop": "Earache", "listed": "2026-09-01"})], baseline=True)
-    content.upsert_items("vinyl", "shop-b", [item("2", artist="Saxon", title="Gods Of Thunder", date="2027-01-22", meta={"shop": "Juno"})], baseline=True)
+    content.upsert_items("vinyl", "shop-b", [item("2", artist="Saxon", title="Gods Of Thunder", date="2027-01-22",
+                         meta={"shop": "Juno"})], baseline=True)                # no editions/price/url -> also falls back to format/"Standard"
     row = content.list_items("vinyl", source_priority=("shop-a", "shop-b"))["items"]
-    assert len(row) == 1 and row[0]["source"] == "shop-a" and row[0]["date"] == "2027-01-22" and row[0]["meta"]["also"] == ["Juno"]
+    assert len(row) == 1 and row[0]["source"] == "shop-a" and row[0]["date"] == "2027-01-22"
+    assert row[0]["meta"]["also"] == [{"shop": "Juno", "name": "Standard", "price": "", "url": None}]
     dated = content.list_items("vinyl", source_priority=("shop-a", "shop-b"))["items"][0]
     assert dated["meta"]["shop"] == "Earache"                                  # still presented as the preferred store's listing
+
+
+def test_a_duplicate_stores_own_pressing_and_price_are_kept_in_also_when_present():
+    content.upsert_items("vinyl", "shop-a", [item("1", artist="Ghost", title="Skeletá", meta={"shop": "Earache"})], baseline=True)
+    content.upsert_items("vinyl", "shop-b", [item("2", artist="Ghost", title="Skeletá", url="https://juno.example/skeleta", meta={
+        "shop": "Juno", "editions": [{"name": "Black Vinyl", "price": "£24.99", "url": "https://juno.example/skeleta-black"}]})], baseline=True)
+    also = content.list_items("vinyl", source_priority=("shop-a", "shop-b"))["items"][0]["meta"]["also"]
+    assert also == [{"shop": "Juno", "name": "Black Vinyl", "price": "£24.99", "url": "https://juno.example/skeleta-black"}]
 
 
 def test_the_new_badge_only_counts_items_that_are_actually_delivered():
@@ -375,6 +385,48 @@ def test_mark_all_seen_and_prune():
         con.execute("UPDATE feed_items SET last_seen = ?", (int(time.time()) - 90 * 86400,))
     assert content.prune("news", older_than_days=45) == 1                                   # the pinned one survives
     assert len(content.list_items("news")["items"]) == 1
+
+
+def test_purchased_items_leave_the_radar_list_but_survive_prune_and_drop_missing():
+    content.upsert_items("vinyl", "shop-a", [item("1"), item("2")], baseline=True)
+    items = content.list_items("vinyl")["items"]
+    iid = items[0]["id"]
+    content.set_status(iid, "purchased")
+    remaining = content.list_items("vinyl")["items"]
+    assert len(remaining) == 1 and remaining[0]["id"] != iid                                # purchased one is gone from the radar list
+
+    with db.db() as con:
+        con.execute("UPDATE feed_items SET last_seen = ? WHERE id = ?", (int(time.time()) - 90 * 86400, iid))
+    assert content.prune("vinyl", older_than_days=45) == 0                                   # purchased survives prune, same as pinned
+    assert content.drop_missing("vinyl", "shop-a", keep_ids=set()) == 1                       # only the non-purchased one is dropped
+    with db.db() as con:
+        assert con.execute("SELECT 1 FROM feed_items WHERE id = ?", (iid,)).fetchone()        # still there
+
+
+def test_list_purchased_orders_soonest_first_undated_last():
+    content.upsert_items("vinyl", "shop-a", [item("a", date="2027-03-01"), item("b", date="2027-01-01"), item("c", date=None)], baseline=True)
+    for i in content.list_items("vinyl")["items"]:
+        content.set_status(i["id"], "purchased")
+    dates = [p["date"] for p in content.list_purchased("vinyl")]
+    assert dates == ["2027-01-01", "2027-03-01", None]
+
+
+def test_add_manual_purchase_and_delete_item():
+    iid = content.add_manual_purchase("vinyl", artist="Ghost", title="Skeletá", variant="Ltd. clear vinyl", date="2027-04-01", image="/covers/x.jpg")
+    p = content.list_purchased("vinyl")[0]
+    assert p["id"] == iid and p["source"] == "manual" and p["status"] == "purchased"
+    assert p["meta"] == {"variant": "Ltd. clear vinyl", "image": "/covers/x.jpg"}
+    assert content.delete_item(iid) is True
+    assert content.list_purchased("vinyl") == []
+    assert content.delete_item(999999) is False
+
+
+def test_set_date_updates_a_tbc_release_date():
+    iid = content.add_manual_purchase("vinyl", artist="Ghost", title="Skeletá", variant="", date=None, image="")
+    assert content.list_purchased("vinyl")[0]["date"] is None
+    assert content.set_date(iid, "2027-05-01") is True
+    assert content.list_purchased("vinyl")[0]["date"] == "2027-05-01"
+    assert content.set_date(999999, "2027-05-01") is False
 
 
 def test_mark_read_is_independent_of_status():
