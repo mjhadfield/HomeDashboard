@@ -334,9 +334,11 @@ def test_old_entries_are_pruned_and_the_log_is_capped(monkeypatch):
 
 
 def test_logging_can_never_take_the_app_down(monkeypatch):
-    monkeypatch.setattr(logbook.db, "db", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
-    logbook.record("error", "x", "goes nowhere")                                                               # no exception
-    logging.getLogger("hub").warning("also fine")
+    # a context, so the broken database is put right before the autouse clean-up's own teardown needs the real one
+    with monkeypatch.context() as m:
+        m.setattr(logbook.db, "db", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+        logbook.record("error", "x", "goes nowhere")                                                           # no exception
+        logging.getLogger("hub").warning("also fine")
 
 
 # =============================================================== maintenance jobs
@@ -416,7 +418,7 @@ def test_the_data_syncs_are_daily_and_staggered_and_the_local_ones_are_marked():
     ws = discover()
     times = {wid: schedule_of(w) for wid, w in ws.items()}
     daily = {wid: t["at"] for wid, t in times.items() if t["mode"] == "daily"}
-    assert daily == {"bins": "03:00", "releases": "04:00", "vinyl": "04:30", "radar": "05:00"}                # one at a time, well apart, in the small hours
+    assert daily == {"bins": "03:00", "releases": "04:00", "vinyl": "04:30", "radar": "05:00", "shortcuts": "05:45"}   # one at a time, well apart, in the small hours
     assert times["news"] == {"mode": "every", "seconds": 3 * 3600} and times["diary"] == {"mode": "every", "seconds": 1800}
     assert {wid for wid, w in ws.items() if w.local} == {"gigs", "system"}
     assert all(ws[w].min_interval >= 6 * 3600 for w in ("releases", "vinyl", "radar"))                          # never let anyone poll the heavy ones hourly

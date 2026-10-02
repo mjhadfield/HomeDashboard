@@ -6,7 +6,7 @@ import socket
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import __version__, config, db, procs
+from . import __version__, appearance, config, db, procs
 from .health import Health
 from .schemas import TV_DEFAULTS, TV_PANELS
 from .widgets import discover
@@ -80,6 +80,7 @@ async def projects_state(health: Health) -> list[dict[str, Any]]:
             "pinned": r["pin_order"] is not None, "pin_order": r["pin_order"],
             "show_projects": bool(r["show_projects"]), "show_launchpad": bool(r["show_launchpad"]),
             "icon": r["icon"] or DEFAULT_PROJECT_ICON.get(r["kind"], "server"),
+            "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"]),
         })
     return out
 
@@ -174,6 +175,7 @@ async def owner_state(health: Health, device: dict[str, Any], attention: list[di
         "links": links_state(health),
         "health": health.state,
         "alerts": [*compute_alerts(widgets, at), *(attention or [])],      # owner only: a sync that keeps failing is a thing to know about
+        "appearance": {"themes": appearance.themes()},
     }
 
 

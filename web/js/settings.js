@@ -2,8 +2,9 @@
 // returning HTML; forms submit to the validated owner API and the page re-renders from fresh config.
 import * as api from './api.js';
 import { $, $$, esc, ico, hhmm, ago, toast, isoOf } from './util.js';
+import { BUILTIN, chosen, specOf, useTheme, applySpec } from './theme.js';
 
-const TABS = [['links', 'Links', 'globe'], ['projects', 'Projects', 'grid'], ['widgets', 'Widgets', 'cal'], ['music', 'Music', 'disc'], ['news', 'News', 'news'], ['screens', 'Screens & devices', 'server'], ['maintenance', 'Maintenance & logs', 'gear'], ['about', 'About', 'chip']];
+const TABS = [['links', 'Links', 'globe'], ['projects', 'Projects', 'grid'], ['widgets', 'Widgets', 'cal'], ['appearance', 'Appearance', 'sun'], ['music', 'Music', 'disc'], ['news', 'News', 'news'], ['screens', 'Screens & devices', 'server'], ['maintenance', 'Maintenance & logs', 'gear'], ['about', 'About', 'chip']];
 const panel = $('#panel');
 let cfg = null, live = null, extras = { artists: { artists: [], music_db: false }, gigs: [] };   // config, live widget status, artists + gigs
 let maint = { jobs: [], log_counts: {}, backups: [], now: 0 }, logs = { items: [], sources: [], counts: {} };   // schedule table + event log
@@ -40,16 +41,16 @@ function linkForm(l = {}) {
       ${field('Subtitle', input('subtitle', l.subtitle, 'maxlength="80" placeholder="e.g. 192.168.0.70:8096"'))}
       ${field('Address', input('url', l.url, 'required type="url" placeholder="https://…"'))}
       ${field('Icon', select('icon', cfg.icons, l.icon || 'globe'))}
-      ${field('Status check address (optional)', input('health_url', l.health_url, 'type="url" placeholder="https://…/health"'), 'If set, a status dot shows on the tile — and on the guest page.', 'wide')}
+      ${field('Status check address (optional)', input('health_url', l.health_url, 'type="url" placeholder="https://…/health"'), '', 'wide')}
     </div>
     <div class="checks">
-      ${check('pinned', 'Pin to the top', l.pinned, 'Pinned tiles always stay first — and always show in the compact Launchpad.')}
+      ${check('pinned', 'Pin to the top', l.pinned, '')}
       ${check('is_primary', 'Highlight this tile', l.is_primary)}
-      ${check('show_guest', 'Show on the guest page', l.show_guest, 'Anyone on your network can see and open it.')}
+      ${check('show_guest', 'Show on the guest page', l.show_guest, '')}
       ${check('more', 'Only in the expanded Launchpad', l.tier === 'more')}
-      ${check('for_media', 'Use as Media view', l.for_media, 'Embedded in the Media page — only one link can be it at a time; picking a new one replaces it.')}
-      ${check('for_music', 'Use as Companion view', l.for_music, 'Embedded in the Companion page — only one link can be it at a time; picking a new one replaces it.')}
-      ${check('for_sql', 'Use as SQL DB view', l.for_sql, 'Embedded in the SQL DB page — only one link can be it at a time; picking a new one replaces it.')}
+      ${check('for_media', 'Use as Media view', l.for_media, '')}
+      ${check('for_music', 'Use as Companion view', l.for_music, '')}
+      ${check('for_sql', 'Use as SQL DB view', l.for_sql, '')}
     </div>
     <div class="form-actions">${act('cancel', 'Cancel')}<button class="btn btn--solid" type="submit">Save link</button></div></form>`;
 }
@@ -66,7 +67,7 @@ function linksTab() {
           ${act('move-link', ico('down'), `data-i="${i}" data-d="1" aria-label="Move down" ${sameGroup(cfg.links, i, 1) ? '' : 'disabled'}`, 'btn--icon')}
           ${act('edit-link', 'Edit', `data-id="${l.id}"`)}${act('delete-link', 'Delete', `data-id="${l.id}" data-name="${esc(l.name)}"`, 'btn--danger')}</div></li>`).join('');
   const adding = editing?.kind === 'link' && editing.id === 'new' ? `<li class="item item--edit">${linkForm()}</li>` : '';
-  return card('Links', 'The tiles on your <b>Launchpad</b>, in order. Mark a link <i>Show on the guest page</i> to share it with visitors — that page shows only those links.',
+  return card('Links', '',
     `<div class="bar-actions">${act('new-link', `${ico('play')}Add link`, '', 'btn--go')}</div><ul class="items">${adding}${rows}</ul>`);
 }
 
@@ -79,22 +80,24 @@ function projectForm(p = null) {
   return `<form class="form" data-form="project" data-slug="${esc(p.slug || '')}">
     <div class="form-grid">
       ${field('Name', input('name', p.name, 'required maxlength="60"'))}
-      ${field('Id', input('slug', p.slug, `${isNew ? 'required pattern="[a-z0-9][a-z0-9\\-]*" maxlength="40"' : 'readonly'}`), isNew ? 'Lowercase letters, digits and dashes. Names the systemd unit <code>hub-proj-&lt;id&gt;</code>; can’t be changed later.' : 'Fixed — it names the systemd unit.')}
+      ${field('Id', input('slug', p.slug, `${isNew ? 'required pattern="[a-z0-9][a-z0-9\\-]*" maxlength="40"' : 'readonly'}`), isNew ? 'Lowercase letters, digits and dashes. Can’t be changed later.' : '')}
       ${field('Description', input('description', p.description, 'maxlength="120"'), '', 'wide')}
       ${field('Type', select('kind', [['web', 'Web app (has a port)'], ['desktop', 'Desktop app (window)']], p.kind))}
-      ${field('Port', input('port', p.port ?? '', 'type="number" min="1" max="65535"'), 'Checked on this PC to show status. Web apps only.')}
-      ${field('Open at', input('url', p.url, 'placeholder="http://{host}:8642/"'), '<code>{host}</code> = the address you opened the dashboard with; <code>{ip}</code> = this PC’s LAN address.', 'wide')}
+      ${field('Port', input('port', p.port ?? '', 'type="number" min="1" max="65535"'), '')}
+      ${field('Open at', input('url', p.url, 'placeholder="http://{host}:8642/"'), '<code>{host}</code> = the address you opened Citadel with; <code>{ip}</code> = this PC’s LAN address.', 'wide')}
       ${field('Working directory', input('cwd', p.cwd, 'required placeholder="/home/you/Projects/App"'), p.cwd_exists === false ? '<span style="color:#fda4af">This folder doesn’t exist on this machine.</span>' : '', 'wide')}
-      ${field('Start command', `<textarea class="input" name="command" rows="2" required spellcheck="false">${esc(p.command || '')}</textarea>`, 'Run directly, <b>not</b> through a shell — quotes group words, but <code>&&</code>, pipes and <code>$VARS</code> don’t work. Relative program paths (e.g. <code>venv/bin/python</code>) resolve from the working directory.', 'wide')}
+      ${field('Start command', `<textarea class="input" name="command" rows="2" required spellcheck="false">${esc(p.command || '')}</textarea>`, 'Not run through a shell: no <code>&&</code>, pipes or <code>$VARS</code>.', 'wide')}
       ${field('Environment (optional)', `<textarea class="input" name="env" rows="2" spellcheck="false" placeholder="KEY=value (one per line)">${esc(envText(p.env))}</textarea>`, '', 'wide')}
-      ${field('Launchpad icon', select('icon', cfg.icons, p.icon || (p.kind === 'desktop' ? 'play' : 'server')), 'Only matters if "Show in Launchpad" below is on.')}
+      ${field('Launchpad icon', select('icon', cfg.icons, p.icon || (p.kind === 'desktop' ? 'play' : 'server')), '')}
     </div>
     <div class="checks">
-      ${check('pinned', 'Pin to the top', p.pinned, 'Pinned projects stay first in the list — in Projects, and in the Launchpad if shown there too.')}
-      ${check('show_projects', 'Show in Projects', p.show_projects, 'Turn off for a standalone app that just gets launched — nothing here to stop. It can still be started from the Launchpad.')}
-      ${check('show_launchpad', 'Show in Launchpad', p.show_launchpad, 'A web project gets a plain clickthrough tile; a desktop project’s tile <i>is</i> its start button, since it has no page to link to.')}
-      ${check('local_only', 'Only reachable from this PC', !p.lan_visible, 'For apps that listen on 127.0.0.1 only — the link is flagged “this PC only”.')}
-      ${check('enabled', 'Show on the dashboard', p.enabled, 'Turning this off also stops it if it is running.')}
+      ${check('pinned', 'Pin to the top', p.pinned, '')}
+      ${check('show_projects', 'Show in Projects', p.show_projects, '')}
+      ${check('show_launchpad', 'Show in Launchpad', p.show_launchpad, '')}
+      ${check('local_only', 'Only reachable from this PC', !p.lan_visible, '')}
+      ${check('enabled', 'Show on the dashboard', p.enabled, 'Also stops it.')}
+      ${check('for_music', 'Use for the Companion page', p.for_music, '')}
+      ${check('for_sql', 'Use for the SQL DB page', p.for_sql, '')}
     </div>
     <div class="form-actions">${act('cancel', 'Cancel')}<button class="btn btn--solid" type="submit">Save project</button></div></form>`;
 }
@@ -103,15 +106,16 @@ function projectsTab() {
   const rows = cfg.projects.map((p, i) => editing?.kind === 'project' && editing.id === p.slug
     ? `<li class="item item--edit">${projectForm(p)}</li>`
     : `<li class="item"><span class="item__icon">${ico(p.kind === 'web' ? 'server' : 'cards')}</span>
-        <div class="item__main"><b>${esc(p.name)}</b>${p.pinned ? '<span class="chip chip--new">Pinned</span>' : ''}<span class="chip">${p.kind === 'web' ? `:${esc(p.port ?? '?')}` : 'Desktop'}</span>${p.show_projects ? '' : '<span class="chip chip--warn">Not in Projects</span>'}${p.show_launchpad ? '<span class="chip chip--vinyl">Launchpad</span>' : ''}${p.lan_visible ? '' : '<span class="chip chip--warn">This PC only</span>'}${p.enabled ? '' : '<span class="chip">Hidden</span>'}${p.cwd_exists ? '' : '<span class="chip chip--warn">Folder missing</span>'}
+        <div class="item__main"><b>${esc(p.name)}</b>${p.pinned ? '<span class="chip chip--new">Pinned</span>' : ''}<span class="chip">${p.kind === 'web' ? `:${esc(p.port ?? '?')}` : 'Desktop'}</span>${p.show_projects ? '' : '<span class="chip chip--warn">Not in Projects</span>'}${p.for_music ? '<span class="chip chip--vinyl">Companion view</span>' : ''}${p.for_sql ? '<span class="chip chip--vinyl">SQL DB view</span>' : ''}${p.lan_visible ? '' : '<span class="chip chip--warn">This PC only</span>'}${p.enabled ? '' : '<span class="chip">Hidden</span>'}${p.cwd_exists ? '' : '<span class="chip chip--warn">Folder missing</span>'}
           <div class="item__sub">${esc(p.command)}</div></div>
         <div class="item__acts">
+          ${act('launchpad-project', `${ico('grid')}Launchpad`, `data-id="${esc(p.slug)}" data-to="${!p.show_launchpad}" aria-pressed="${!!p.show_launchpad}" title="${p.show_launchpad ? 'On the Launchpad — click to take it off' : 'Not on the Launchpad — click to add it'}"`, `btn--toggle${p.show_launchpad ? ' is-on' : ''}`)}
           ${act('pin-project', ico('pin'), `data-id="${esc(p.slug)}" data-to="${!p.pinned}" aria-label="${p.pinned ? 'Unpin' : 'Pin to top'}" title="${p.pinned ? 'Unpin' : 'Pin to top'}"`, `btn--icon${p.pinned ? ' is-pinned' : ''}`)}
           ${act('move-project', ico('up'), `data-i="${i}" data-d="-1" aria-label="Move up" ${sameGroup(cfg.projects, i, -1) ? '' : 'disabled'}`, 'btn--icon')}
           ${act('move-project', ico('down'), `data-i="${i}" data-d="1" aria-label="Move down" ${sameGroup(cfg.projects, i, 1) ? '' : 'disabled'}`, 'btn--icon')}
           ${act('edit-project', 'Edit', `data-id="${esc(p.slug)}"`)}${act('delete-project', 'Delete', `data-id="${esc(p.slug)}" data-name="${esc(p.name)}"`, 'btn--danger')}</div></li>`).join('');
   const adding = editing?.kind === 'project' && editing.id === 'new' ? `<li class="item item--edit">${projectForm()}</li>` : '';
-  return card('Projects', 'Things the dashboard can start and stop. Each runs as its own supervised systemd unit, so it keeps running if the dashboard restarts. Only owner devices can start, stop or edit them.',
+  return card('Projects', '',
     `<div class="bar-actions">${act('new-project', `${ico('play')}Add project`, '', 'btn--go')}</div><ul class="items">${adding}${rows}</ul>`);
 }
 
@@ -123,15 +127,48 @@ function statusLine(w, id = '') {
   return `<div class="status-line"${id ? ` data-status="${id}"` : ''}><span class="dot"></span>${w.configured ? 'Waiting for the first sync…' : 'Not set up yet'}</div>`;
 }
 
+// ---- Shortcuts: the row of web links across the top of the dashboard --------------------------------------------
+const SC_MODES = [['site', 'Site’s own icon'], ['builtin', 'Citadel icon'], ['image', 'Image address'], ['letter', 'First letter']];
+function scPreview(x) {
+  const got = (live?.shortcuts?.data?.shortcuts || []).find(s => s.id === x.id);
+  const mode = x.icon_mode || 'site';
+  if (mode === 'builtin') return ico(x.icon || 'globe');
+  if (got?.img && (mode === 'site' || mode === 'image')) return `<img src="${esc(got.img)}" alt="">`;
+  return `<span class="sc-row__letter">${esc(((x.label || '').trim() || (x.url || '?').replace(/^https?:\/\/(www\.)?/, '')).charAt(0).toUpperCase() || '?')}</span>`;
+}
+const scRow = (x = {}) => {
+  const mode = x.icon_mode || 'site';
+  return `<div class="sc-row" data-sc data-id="${esc(x.id || '')}">
+  <span class="sc-row__preview" title="Current icon">${scPreview(x)}</span>
+  ${field('Label', input('sc_label', x.label || '', 'maxlength="30" placeholder="Optional"'))}
+  ${field('Address', input('sc_url', x.url || '', 'type="url" placeholder="https://…" spellcheck="false"'), '', 'sc-row__url')}
+  ${field('Icon', select('sc_mode', SC_MODES, mode))}
+  ${field('Citadel icon', select('sc_icon', cfg.icons, x.icon || 'globe'), '', `sc-row__opt${mode === 'builtin' ? '' : ' is-hidden'}`)}
+  ${field('Image address', input('sc_image', x.image || '', 'type="url" placeholder="https://…/logo.png" spellcheck="false"'), '', `sc-row__opt${mode === 'image' ? '' : ' is-hidden'}`)}
+  <span class="sc-row__tools">${act('sc-up', ico('up'), 'aria-label="Move up" title="Move up"', 'btn--icon')}${act('sc-down', ico('down'), 'aria-label="Move down" title="Move down"', 'btn--icon')}${act('sc-remove', 'Remove', '', 'btn--danger')}</span></div>`;
+};
+
+function shortcutsCard() {
+  const s = cfg.widgets.shortcuts.settings, failed = live?.shortcuts?.data?.failed || [];
+  return card('Shortcuts — the top bar',
+    '',
+    `${statusLine(live?.shortcuts, 'shortcuts')}${failed.length ? `<div class="status-line"><span class="dot"></span>No icon found for ${esc(failed.join(', '))} — showing its first letter.</div>` : ''}
+    <form class="form" data-form="shortcuts" style="padding:0 18px 12px">
+      <div class="checks" style="margin-bottom:6px">${check('sc_show', 'Show the shortcut bar', s.show, '')}</div>
+      <div id="scs">${s.shortcuts.map(scRow).join('')}</div>
+      <div class="bar-actions" style="padding:10px 0 4px">${act('sc-add', `${ico('plus')}Add shortcut`, '', 'btn--go')}${cfg.links.length ? act('sc-import', `${ico('globe')}Copy in from Links`, 'title="Adds a shortcut for each Launchpad link not already here — the links themselves are left alone"') : ''}</div>
+      <div class="form-actions">${act('refresh-widget', 'Refresh icons', 'data-id="shortcuts"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
 function binsCard() {
   const s = cfg.widgets.bins.settings;
   const hours = Array.from({ length: 24 }, (_, h) => [h, `${String(h).padStart(2, '0')}:00`]);
   return card('Bins — Salford City Council',
-    'Reads your collection days from the council website. Your <b>property reference (UPRN)</b> identifies the address — find it at <a href="https://www.findmyaddress.co.uk/search" target="_blank" rel="noopener">findmyaddress.co.uk</a>.',
+    'Find your property reference (UPRN) at <a href="https://www.findmyaddress.co.uk/search" target="_blank" rel="noopener">findmyaddress.co.uk</a>.',
     `${statusLine(live?.bins, 'bins')}<form class="form" data-form="bins" style="padding:0 18px 12px">
       <div class="form-grid">
         ${field('Property reference (UPRN)', input('uprn', s.uprn, 'inputmode="numeric" pattern="\\d{5,14}" placeholder="e.g. 123456789012"'))}
-        ${field('“Put the bin out” reminder from', select('put_out_hour', hours, s.put_out_hour), 'The evening before collection, the alert strip starts showing from this time.')}
+        ${field('“Put the bin out” reminder from', select('put_out_hour', hours, s.put_out_hour), '')}
       </div>
       <div class="checks"><span class="field__l">Remind me about</span>${Object.entries(cfg.streams).map(([k, t]) => check(`stream_${k}`, t, s.alert_streams.includes(k))).join('')}</div>
       <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="bins"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
@@ -146,7 +183,7 @@ const calRow = (c = {}) => `<div class="cal-row" data-cal data-id="${esc(c.id ||
 function diaryCard() {
   const s = cfg.widgets.diary.settings;
   return card('Diary — calendars',
-    'Shows upcoming events. In Google Calendar: <i>Settings → your calendar → Integrate calendar → “Secret address in iCal format”</i>. That address is read-only, but anyone holding it can read the calendar, so it’s stored privately and never shown again. Google can be a few hours slow to refresh these feeds.',
+    'Google Calendar → Settings → your calendar → Integrate calendar → <i>Secret address in iCal format</i>.',
     `${statusLine(live?.diary, 'diary')}<form class="form" data-form="diary" style="padding:0 18px 12px">
       <div id="cals">${(s.calendars.length ? s.calendars : [{}]).map(calRow).join('')}</div>
       <div class="bar-actions" style="padding:10px 0 0">${act('add-cal', `${ico('play')}Add calendar`, '', 'btn--go')}</div>
@@ -177,7 +214,7 @@ function gigsCard() {
           <div class="item__sub">${esc(g.date)}${g.venue || g.city ? ` · ${esc([g.venue, g.city].filter(Boolean).join(', '))}` : ''}${g.doors ? ` · doors ${esc(g.doors)}` : ''}</div></div>
         <div class="item__acts">${act('edit-gig', 'Edit', `data-id="${g.id}"`)}${act('delete-gig', 'Delete', `data-id="${g.id}" data-name="${esc(g.artist)}"`, 'btn--danger')}</div></li>`).join('');
   const adding = editing?.kind === 'gig' && editing.id === 'new' ? `<li class="item item--edit">${gigForm()}</li>` : '';
-  return card('Booked gigs', 'Tickets you have. The <b>Next gig</b> card counts down to the soonest, and you get a reminder in the alert strip the day before.',
+  return card('Booked gigs', '',
     `<div class="bar-actions">${act('new-gig', `${ico('play')}Add gig`, '', 'btn--go')}</div><ul class="items">${adding}${rows || (adding ? '' : '<li class="item"><span class="field__h">No gigs yet.</span></li>')}</ul>`);
 }
 
@@ -190,7 +227,7 @@ function artistsCard() {
         <div class="item__sub">${esc(SOURCE_LABEL[a.source] || a.source)}${a.weight ? ` · score ${Math.round(a.weight)}` : ''}</div></div>
       <div class="item__acts"><select class="input input--sm" data-artist-status data-id="${a.id}" aria-label="Status of ${esc(a.name)}">${opt('follow', 'Follow', a.status)}${opt('pin', 'Pin', a.status)}${opt('mute', 'Mute', a.status)}</select>
         ${act('remove-artist', 'Remove', `data-id="${a.id}" data-name="${esc(a.name)}"`, 'btn--danger')}</div></li>`).join('');
-  return card('Artists you follow', `Releases, vinyl and gigs are found for these artists. <b>Pin</b> to check them first; <b>Mute</b> to hide everything about them. ${list.length} followed, ${muted} muted.`,
+  return card('Artists you follow', `${list.length} followed, ${muted} muted. <b>Pin</b> checks them first; <b>Mute</b> hides them.`,
     `<form class="bar-actions" data-form="artist-add" style="flex-wrap:wrap">
        <input class="input" name="name" required maxlength="80" placeholder="Follow an artist…" style="max-width:260px"><button class="btn btn--go" type="submit">Follow</button>
        ${act('resync', 'Resync from Music Companion', extras.artists.music_db ? '' : 'disabled title="Music Companion\'s database wasn\'t found"')}
@@ -202,24 +239,25 @@ const typeChecks = (types, selected) => types.map(t => check(`type_${t}`, t, sel
 
 function releasesCard() {
   const s = cfg.widgets.releases.settings;
-  return card('Releases — new albums', 'New studio albums from the artists you follow, from MusicBrainz (no key needed). Singles, live albums, compilations and soundtracks are left out unless you switch them on. MusicBrainz is polite-rate-limited, so a first full pass takes a few minutes.',
+  return card('Releases — new albums', '',
     `${statusLine(live?.releases, 'releases')}<form class="form" data-form="releases" style="padding:0 18px 12px"><div class="form-grid">
-      ${field('Look back (days)', input('lookback_days', s.lookback_days, 'type="number" min="14" max="730"'), 'How far back to keep recent albums.')}
-      ${field('Look ahead (days)', input('horizon_days', s.horizon_days, 'type="number" min="30" max="730"'), 'How far into the future to look for announced albums. MusicBrainz only knows about albums once they are announced.')}
-      ${field('Artists per sync', input('batch', s.batch, 'type="number" min="5" max="80"'), 'Checked oldest-first, so everyone is covered over a day.')}
+      ${field('Look back (days)', input('lookback_days', s.lookback_days, 'type="number" min="14" max="730"'), '')}
+      ${field('Look ahead (days)', input('horizon_days', s.horizon_days, 'type="number" min="30" max="730"'), '')}
+      ${field('Artists per sync', input('batch', s.batch, 'type="number" min="5" max="80"'), '')}
       </div><div class="checks"><span class="field__l">Include</span>${typeChecks(['Album', 'EP', 'Single'], s.types)}
-        ${check('include_extras', 'Live albums, compilations and soundtracks', s.include_extras, 'Only applies to the types ticked above.')}</div>
+        ${check('include_extras', 'Live albums, compilations and soundtracks', s.include_extras, '')}</div>
       <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="releases"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
 const shopRow = (x = {}) => `<div class="feedcfg shopcfg" data-shop data-id="${esc(x.id || '')}" data-kind="${esc(x.kind || 'shopify')}">
   ${input('s_name', x.name || '', 'placeholder="Name" maxlength="40" aria-label="Store name"')}${input('s_url', x.url || '', 'type="url" placeholder="https://store.example" aria-label="Store address"')}
-  ${input('s_coll', x.collection || '', `placeholder="${x.kind === 'juno' ? 'metal,rock,punk-hardcore' : 'pre-orders'}" maxlength="120" aria-label="${x.kind === 'juno' ? 'Juno sections' : 'Pre-order collection'}"`)}
+  ${x.kind === 'wix' ? input('s_coll', '', 'placeholder="(whole shop)" disabled aria-label="Wix shops are watched whole"')
+    : input('s_coll', x.collection || '', `placeholder="${x.kind === 'juno' ? 'metal,rock,punk-hardcore' : 'pre-orders'}" maxlength="120" aria-label="${x.kind === 'juno' ? 'Juno sections' : 'Pre-order collection'}"`)}
   ${check('s_on', 'On', x.enabled !== false)}${act('check-shop', 'Check')}${act('remove-shop', 'Remove', '', 'btn--danger')}</div>`;
 
 function vinylCard() {
   const s = cfg.widgets.vinyl.settings;
-  return card('Vinyl radar — pre-orders', 'Records you can <b>pre-order</b> by artists you follow, from label and record stores. Any <b>Shopify</b> store works: enter its address and the <b>collection</b> that lists its pre-orders (the last part of a link like <code>store.example/collections/<b>pre-orders</b></code>). Use <b>Check</b> to see what a store offers before you rely on it. <b>Juno</b> is read from its pre-order pages by genre (<code>metal</code>, <code>rock</code>, <code>punk-hardcore</code>…) — slowly and politely, as its robots.txt asks, at most once a day. Release dates appear where a store gives one; otherwise you’ll see when it was listed. (Hive sits behind a bot-check, so it can’t be read.)',
+  return card('Vinyl radar — pre-orders', 'Shopify stores: the address plus the pre-order collection (<code>store.example/collections/<b>pre-orders</b></code>). Juno: genre sections, e.g. <code>metal,rock</code>.',
     `${statusLine(live?.vinyl, 'vinyl')}<form class="form" data-form="vinyl" style="padding:0 18px 12px">
       <div id="shops"><div class="field__l" style="display:grid;grid-template-columns:minmax(110px,1fr) minmax(200px,2fr) minmax(110px,1fr);gap:10px;padding:0 0 6px"><span>Store</span><span>Address</span><span>Pre-order collection / Juno sections</span></div>${s.shops.map(shopRow).join('')}</div>
       <div class="bar-actions" style="padding:10px 0 4px">${act('add-shop', `${ico('play')}Add store`, '', 'btn--go')}</div>
@@ -227,7 +265,7 @@ function vinylCard() {
 }
 
 function purchasesCard() {
-  return card('Vinyl pre-orders — add a purchase', 'Bought a record somewhere this app doesn’t watch — a shop, a gig, secondhand? Add it by hand; it appears in <b>Confirmed Pre-orders</b> on the Vinyl radar tile alongside anything bought straight from a tracked store. Editing the date later (e.g. once a TBC release is announced) or removing it once it arrives is done from that tile, not here.',
+  return card('Vinyl pre-orders — add a purchase', 'Records bought elsewhere. They appear under Confirmed Pre-orders on the Vinyl radar tile.',
     `<form class="form" data-form="purchase" style="padding:0 18px 12px"><div class="form-grid">
       ${field('Artist', input('artist', '', 'required maxlength="80"'))}
       ${field('Title', input('title', '', 'required maxlength="200"'))}
@@ -240,10 +278,10 @@ function purchasesCard() {
 
 function radarCard() {
   const s = cfg.widgets.radar.settings;
-  return card('Gig radar — Ticketmaster', 'Upcoming shows near you for artists you follow. Needs a free API key from <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener">developer.ticketmaster.com</a> (5,000 calls a day). Only events genuinely by the artist are kept, and VIP / premium / hospitality packages are left out (merch packages stay).',
+  return card('Gig radar — Ticketmaster', 'Needs a free API key from <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener">developer.ticketmaster.com</a>.',
     `${statusLine(live?.radar, 'radar')}<form class="form" data-form="radar" style="padding:0 18px 12px"><div class="form-grid">
       ${field('API key', input('api_key', '', `type="password" autocomplete="off" spellcheck="false" placeholder="${s.has_api_key ? '•••• saved — leave blank to keep' : 'paste your Consumer Key'}"`), '', 'wide')}
-      ${field('Your location (latitude, longitude)', input('latlong', s.latlong, 'placeholder="53.4808,-2.2426"'), 'Manchester by default. In Google Maps, right-click your town and click the coordinates to copy them.')}
+      ${field('Your location (latitude, longitude)', input('latlong', s.latlong, 'placeholder="53.4808,-2.2426"'), 'Google Maps: right-click a place to copy its coordinates.')}
       ${field('Radius (miles)', input('radius_miles', s.radius_miles, 'type="number" min="5" max="500"'))}
       ${field('Artists per sync', input('batch', s.batch, 'type="number" min="5" max="300"'))}
       </div><div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="radar"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
@@ -265,23 +303,23 @@ function newsSettingsCard() {
   const s = cfg.widgets.news.settings;
   const feedErrors = live?.news?.data?.errors || [];
   const errNote = feedErrors.length ? `<div class="status-line status-line--err">⚠ Some feeds couldn't be read last sync: ${esc(feedErrors.join(', '))}</div>` : '';
-  return card('Headlines — RSS feeds', 'Any RSS or Atom feed. The defaults lean metal and vinyl. <b>Only show</b> keeps just stories mentioning one of those words; <b>Hide</b> drops stories that mention any. Case doesn’t matter. Each feed can also set its own under <b>Filtering</b>, which replaces (not adds to) the lists below for that feed only.',
+  return card('Headlines — RSS feeds', 'A feed’s own <b>Filtering</b> replaces the lists below for that feed.',
     `${statusLine(live?.news, 'news')}${errNote}<form class="form" data-form="news" style="padding:0 18px 12px">
       <div id="feeds">${s.feeds.map(feedRow).join('')}</div>
       <div class="bar-actions" style="padding:10px 0 4px">${act('add-feed', `${ico('play')}Add feed`, '', 'btn--go')}</div>
       <div class="form-grid" style="margin-top:8px">
-        ${field('Only show stories mentioning (one per line)', `<textarea class="input" name="include" rows="4" spellcheck="false" placeholder="e.g. vinyl&#10;tour&#10;reissue">${esc(s.include.join('\n'))}</textarea>`, 'Leave empty to show everything. The default for feeds that don\'t set their own.')}
+        ${field('Only show stories mentioning (one per line)', `<textarea class="input" name="include" rows="4" spellcheck="false" placeholder="e.g. vinyl&#10;tour&#10;reissue">${esc(s.include.join('\n'))}</textarea>`, 'Empty = show everything.')}
         ${field('Hide stories mentioning (one per line)', `<textarea class="input" name="exclude" rows="4" spellcheck="false" placeholder="e.g. kardashian">${esc(s.exclude.join('\n'))}</textarea>`)}
         ${field('Keep stories for (days)', input('max_age_days', s.max_age_days, 'type="number" min="3" max="180"'))}
       </div><div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="news"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
 // ---- Screens & devices ------------------------------------------------------------------------------------------
-const PANEL_LABELS = { bins: ['Bins', 'The next two collections.'], gigs: ['Next gig', 'Your next booked gig, with a countdown.'], diary: ['Diary', 'Upcoming events — private: anyone who can see the TV will see them.'] };
+const PANEL_LABELS = { bins: ['Bins', ''], gigs: ['Next gig', ''], diary: ['Diary', 'Anyone who can see the TV will see your events.'] };
 
 function screensCard() {
   const s = cfg.screens;
-  return card('TV / screens', 'Choose what a paired screen may show. Panels rotate; the calendar is off by default because guests can see a TV.',
+  return card('TV / screens', '',
     `<form class="form" data-form="screens" style="padding:0 18px 12px">
       <div class="checks"><span class="field__l">Panels</span>${cfg.tv_panels.map(k => check(`panel_${k}`, PANEL_LABELS[k][0], s.panels.includes(k), PANEL_LABELS[k][1])).join('')}
         ${check('show_alerts', 'Show reminders banner (bin night, next event)', s.show_alerts)}</div>
@@ -290,7 +328,7 @@ function screensCard() {
 }
 
 const pairCard = () => card('Pair a screen',
-  'On the TV’s browser open <code>' + esc(cfg.public_url) + '/tv</code>. It shows a short code — type it here to approve that screen. Screens can only <i>view</i> what you allow above.',
+  'On the TV, open <code>' + esc(cfg.public_url) + '/tv</code> and enter the code it shows.',
   `<form class="form" data-form="pair" style="padding:0 18px 14px"><div class="form-grid">
     ${field('Code shown on the TV', input('code', '', 'required maxlength="8" autocomplete="off" placeholder="ABC-123"'))}
     ${field('Name it', input('name', 'Games room TV', 'maxlength="60"'))}</div>
@@ -303,14 +341,14 @@ function devicesCard() {
     <div class="item__main"><b>${esc(d.name)}</b>${roleChip(d.role)}${d.current ? '<span class="chip">This device</span>' : ''}
       <div class="item__sub">last seen ${esc(ago(d.last_seen))}${d.user_agent ? ` · ${esc(d.user_agent.slice(0, 70))}` : ''}</div></div>
     <div class="item__acts">${act('rename-device', 'Rename', `data-id="${esc(d.id)}" data-name="${esc(d.name)}"`)}${d.current ? '' : act('revoke-device', 'Revoke', `data-id="${esc(d.id)}" data-name="${esc(d.name)}"`, 'btn--danger')}</div></li>`).join('');
-  return card('Devices', 'Everything that has been let in. Revoking a device signs it out immediately.', `<ul class="items">${rows}</ul>`);
+  return card('Devices', '', `<ul class="items">${rows}</ul>`);
 }
 
 function enrolCard() {
   const result = enrol ? `<div class="enrol"><div class="enrol__qr">${enrol.qr_svg}</div><div>
-      <p class="sx__intro" style="padding:0 0 10px">Open this on the new device (or scan the code). It works <b>once</b>, for 15 minutes.</p>
+      <p class="sx__intro" style="padding:0 0 10px">Open on the new device or scan the code. Works once, for 15 minutes.</p>
       <input class="input" readonly value="${esc(enrol.url)}" data-select-all aria-label="Enrolment link"></div></div>` : '';
-  return card('Add an owner device', 'Owner devices get everything: the dashboard, start/stop, and these settings. Anyone else on your network sees only the guest page.',
+  return card('Add an owner device', '',
     `<div class="bar-actions">${act('new-enrol', `${ico('play')}Create a one-time link`, '', 'btn--go')}</div>${result}`);
 }
 
@@ -361,11 +399,11 @@ function scheduleCard() {
   const sync = maint.jobs.filter(j => j.kind === 'sync'), house = maint.jobs.filter(j => j.kind === 'maintenance');
   const bad = maint.jobs.filter(j => ['failing', 'stale'].includes(j.status));
   const banner = bad.length ? `<div class="status-line status-line--err"><span class="dot dot--bad"></span>${bad.map(j => `<b>${esc(j.title)}</b>`).join(', ')} ${bad.length === 1 ? 'needs' : 'need'} attention — see the message beneath ${bad.length === 1 ? 'it' : 'each'}, and the log below.</div>` : '';
-  return card('Schedule', 'Everything that updates by itself. The data syncs run <b>once a day, overnight, one after another</b>, so the services behind them (MusicBrainz, Ticketmaster, the record stores, the council) are never hammered — each artist is only looked up about once a day however often the service restarts. A job that missed its slot (the PC was off) runs when it can. <i>Run now</i> works any time; after a failure a job retries after 5 min, then 15, 30, 60 and at most every 2 hours.',
+  return card('Schedule', '',
     `${banner}<div class="sched__head"><span>Job</span><span>Schedule</span><span>Status</span><span></span></div>
      <ul class="items sched__list">${sync.map(jobRow).join('')}</ul>
      <div class="sx__sub hud">Housekeeping</div><ul class="items sched__list">${house.map(jobRow).join('')}</ul>
-     <p class="sx__intro">Nightly backups (the last 7) are kept in <code>${esc(cfg.paths.database.replace(/[^/]+$/, ''))}backups/</code> — ${maint.backups.length ? esc(maint.backups.join(', ')) : 'none yet'}. To restore one: stop the service, copy it over <code>hub.sqlite</code>, start the service.</p>`,
+     <p class="sx__intro">Backups (last 7): <code>${esc(cfg.paths.database.replace(/[^/]+$/, ''))}backups/</code> — ${maint.backups.length ? esc(maint.backups.join(', ')) : 'none yet'}. To restore: stop the service, copy one over <code>hub.sqlite</code>, start it.</p>`,
     `<button class="btn" type="button" data-do="maint-refresh">Refresh</button>`);
 }
 
@@ -384,7 +422,7 @@ function logListHtml() {
 function logCard() {
   const c = logs.counts || {};
   const seg = [['warning', 'Problems'], ['all', 'Everything'], ['error', 'Errors only']].map(([v, l]) => `<button type="button" class="btn${logf.level === v ? ' is-on' : ''}" data-do="log-level" data-level="${v}">${l}</button>`).join('');
-  return card('Event log', `What the dashboard did and what went wrong: failed syncs, a store or API that changed, unexpected errors. Kept for 30 days. Secrets (API keys, private calendar addresses) are stripped before anything is written. Last 24 hours: <b>${c.error || 0}</b> errors, <b>${c.warning || 0}</b> warnings.`,
+  return card('Event log', `Last 24 hours: <b>${c.error || 0}</b> errors, <b>${c.warning || 0}</b> warnings.`,
     `<div class="bar-actions logbar">${seg}
        <select class="input input--sm" data-log-source aria-label="Source"><option value="">All sources</option>${logs.sources.map(x => `<option value="${esc(x)}"${logf.source === x ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>
        <input class="input input--sm" data-log-q placeholder="Search…" value="${esc(logf.q)}" style="max-width:200px" aria-label="Search the log">
@@ -404,18 +442,91 @@ async function paintMaint() {
   const tabBtn = $('[data-tab="maintenance"]'); if (tabBtn) tabBtn.classList.toggle('has-attn', needsAttention());
 }
 
+// ---- Appearance: themes and background pictures ---------------------------------------------------------------------
+const FIT_LABELS = { cover: 'Fill the screen', contain: 'Show all of it', tile: 'Tile', center: 'Centre, actual size' };
+const BUILTIN_LOOK = { dark: { panel: '#0e0b14', accent: '#8b5cf6' }, light: { panel: '#f8f0e2', accent: '#b5541f' } };
+
+function themePreview(t) {
+  const look = t.accent ? t : { ...t, ...BUILTIN_LOOK[t.id] };
+  const bg = t.background?.file ? `<img src="/backgrounds/${esc(t.background.file)}" alt="">` : '';
+  return `<span class="tp" style="--tp-panel:${esc(look.panel)};--tp-accent:${esc(look.accent)};--tp-base:${look.base === 'light' ? '#f2e8d5' : '#07060a'}">${bg}
+    <span class="tp__card"><span class="tp__tick"></span><span class="tp__line"></span><span class="tp__line tp__line--short"></span></span></span>`;
+}
+
+function themeForm(t) {
+  const base = t.base || 'dark', bg = t.background || {};
+  const panel = t.panel || cfg.appearance.base_panel[base], accent = t.accent || cfg.appearance.base_accent[base];
+  const pct = (n, v, min, max, step) => `<span class="range"><input type="range" name="${n}" min="${min}" max="${max}" step="${step}" value="${v}"><output>${v}%</output></span>`;
+  const ownPanel = t.panel && t.panel !== cfg.appearance.base_panel[base];       // a chosen panel colour isn't reset by switching Dark/Light
+  return `<form class="form" data-form="theme" data-id="${esc(t.id || '')}"${ownPanel ? ' data-panel-touched="1"' : ''}>
+    <div class="form-grid">
+      ${field('Name', input('name', t.name || '', 'required maxlength="40" placeholder="e.g. Midnight blue"'))}
+      ${field('Start from', select('base', [['dark', 'Dark — light text on dark panels'], ['light', 'Light — dark text on light panels']], base), '')}
+      ${field('Accent colour', `<span class="colour"><input type="color" name="accent" value="${esc(accent)}"><code>${esc(accent)}</code></span>`, '')}
+      ${field('Panel colour', `<span class="colour"><input type="color" name="panel" value="${esc(panel)}"><code>${esc(panel)}</code>${act('panel-reset', 'Reset', 'title="Back to the starting theme’s panel colour"', 'btn--icon-text')}</span>`, '')}
+      ${field('Panel see-through', pct('panel_opacity', t.panel_opacity ?? 100, 30, 100, 5), '')}
+    </div>
+    <div class="field__l" style="margin-top:18px">Background picture</div>
+    <div class="bgpick">
+      <span class="bgpick__thumb">${bg.file ? `<img src="/backgrounds/${esc(bg.file)}" alt="">` : '<span>None</span>'}</span>
+      <label class="btn btn--go">${ico('plus')}Choose a picture…<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-bg-file hidden></label>
+      ${act('bg-remove', 'Remove', bg.file ? '' : 'hidden')}
+      <input type="hidden" name="bg_file" value="${esc(bg.file || '')}">
+      <span class="field__h">JPEG, PNG, WebP or GIF, up to ${cfg.appearance.max_background_mb} MB.</span>
+    </div>
+    <div class="form-grid" style="margin-top:12px">
+      ${field('Fit', select('fit', cfg.appearance.fits.map(f => [f, FIT_LABELS[f]]), bg.fit || 'cover'))}
+      ${field('Dim the picture', pct('dim', bg.dim ?? 40, 0, 90, 5), '')}
+    </div>
+    <div class="checks">${check('glow', 'Accent glow in the corners', bg.glow !== false)}</div>
+    <p class="field__h" style="margin-top:6px">Previews live; nothing is kept until you save.</p>
+    <div class="form-actions">${act('cancel', 'Cancel')}<button class="btn btn--solid" type="submit">${t.id ? 'Save theme' : 'Create theme'}</button></div></form>`;
+}
+
+/** The theme the editor form describes right now (for the live preview and for saving). */
+function readTheme(f) {
+  return { name: val(f, 'name'), base: f.elements.base.value, accent: f.elements.accent.value, panel: f.elements.panel.value,
+    panel_opacity: Number(f.elements.panel_opacity.value),
+    background: { file: f.elements.bg_file.value, fit: f.elements.fit.value, dim: Number(f.elements.dim.value), glow: f.elements.glow.checked } };
+}
+function previewTheme(f) {
+  applySpec(specOf(readTheme(f)));
+  $$('.range output', f).forEach(o => { o.textContent = `${o.previousElementSibling.value}%`; });
+  $$('.colour', f).forEach(c => { c.querySelector('code').textContent = c.querySelector('input').value; });
+}
+
+function appearanceTab() {
+  const themes = cfg.appearance.themes, cur = chosen();
+  const tiles = [...BUILTIN, ...themes].map(t => `<button type="button" class="themepick${t.id === cur ? ' is-current' : ''}" data-do="use-theme" data-id="${esc(t.id)}" aria-pressed="${t.id === cur}">
+      ${themePreview(t)}<span class="themepick__name">${esc(t.name)}${t.id === cur ? `<small>${ico('check')}On this device</small>` : ''}</span></button>`).join('');
+  const rows = themes.map(t => editing?.kind === 'theme' && editing.id === t.id ? `<li class="item item--edit">${themeForm(t)}</li>`
+    : `<li class="item"><span class="item__icon item__icon--theme">${themePreview(t)}</span>
+        <div class="item__main"><b>${esc(t.name)}</b>${t.id === cur ? '<span class="chip chip--new">This device</span>' : ''}<span class="chip">from ${t.base === 'light' ? 'Light' : 'Dark'}</span>${t.background.file ? '<span class="chip">Background</span>' : ''}
+          <div class="item__sub">accent ${esc(t.accent)} · panels ${esc(t.panel)}${t.panel_opacity < 100 ? ` at ${t.panel_opacity}%` : ''}</div></div>
+        <div class="item__acts">${act('edit-theme', 'Edit', `data-id="${esc(t.id)}"`)}${act('copy-theme', 'Duplicate', `data-id="${esc(t.id)}"`)}${act('delete-theme', 'Delete', `data-id="${esc(t.id)}" data-name="${esc(t.name)}"`, 'btn--danger')}</div></li>`).join('');
+  const adding = editing?.kind === 'theme' && editing.id === 'new' ? `<li class="item item--edit">${themeForm(editing.seed || {})}</li>` : '';
+  return card('Theme on this device',
+    '',
+    `<div class="themepicks">${tiles}</div>`)
+    + card('Custom themes',
+    '',
+    `<div class="bar-actions">${act('new-theme', `${ico('plus')}New theme`, '', 'btn--go')}</div><ul class="items">${adding}${rows}</ul>
+     ${themes.length || adding ? '' : '<p class="sx__intro" style="padding-top:0">No custom themes yet.</p>'}`);
+}
+
 // ---- About -----------------------------------------------------------------------------------------------------
 function aboutTab() {
   const rows = [['Version', cfg.version], ['Host', `${cfg.host} · ${cfg.ip}`], ['Address', cfg.public_url], ['Database', cfg.paths.database], ['Projects folder', cfg.paths.projects],
     ['Links / projects / devices', `${cfg.links.length} / ${cfg.projects.length} / ${cfg.devices.length}`]];
-  return card('About', 'Copy <code>data/hub.sqlite</code> (and <code>.env</code>) to move Citadel to another machine — see the README.',
+  return card('About', 'To move Citadel, copy <code>data/hub.sqlite</code> and <code>.env</code>.',
     `<ul class="items">${rows.map(([k, v]) => `<li class="item" style="grid-template-columns:200px 1fr"><span class="field__l">${esc(k)}</span><span class="mono" style="word-break:break-all">${esc(v)}</span></li>`).join('')}</ul>`);
 }
 
 // ---- rendering ---------------------------------------------------------------------------------------------------
 function render() {
+  if (editing?.kind !== 'theme') useTheme(chosen(), cfg.appearance.themes);     // ends any live preview; picks up edits made elsewhere
   $('#tabs').innerHTML = TABS.map(([id, label, icon]) => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}"${id === 'maintenance' && needsAttention() ? ' class="has-attn"' : ''}>${ico(icon)}${esc(label)}</button>`).join('');
-  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => binsCard() + diaryCard(), music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
+  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
 }
 
 async function load() {
@@ -434,6 +545,31 @@ $('#tabs').addEventListener('click', e => {
 });
 
 panel.addEventListener('change', e => {
+  const file = e.target.closest('[data-bg-file]');
+  if (file?.files?.[0]) {
+    const f = file.closest('form'), pic = file.files[0];
+    file.value = '';
+    if (pic.size > cfg.appearance.max_background_mb * 1_000_000) { toast(`Pictures up to ${cfg.appearance.max_background_mb} MB, please`); return; }
+    toast('Uploading…');
+    fetch('/api/owner/appearance/backgrounds', { method: 'POST', headers: { 'X-Hub': '1', 'Content-Type': pic.type || 'application/octet-stream' }, body: pic })
+      .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.detail || `Upload failed (${r.status})`); return j; })
+      .then(({ file: name }) => {
+        f.elements.bg_file.value = name;
+        $('.bgpick__thumb', f).innerHTML = `<img src="/backgrounds/${esc(name)}" alt="">`;
+        f.querySelector('[data-do="bg-remove"]').hidden = false;
+        previewTheme(f); toast('Picture added — save the theme to keep it');
+      }).catch(err => toast(err.message));
+    return;
+  }
+  const tf = e.target.closest('[data-form="theme"]');
+  if (tf) { previewTheme(tf); return; }
+  const scMode = e.target.closest('[name=sc_mode]');
+  if (scMode) {
+    const row = scMode.closest('[data-sc]');
+    row.querySelector('[name=sc_icon]').closest('.field').classList.toggle('is-hidden', scMode.value !== 'builtin');
+    row.querySelector('[name=sc_image]').closest('.field').classList.toggle('is-hidden', scMode.value !== 'image');
+    return;
+  }
   const mode = e.target.closest('[data-sched-mode]');
   if (mode) {                                                                    // show the time box for "Daily at", the number box for "Every"
     const f = mode.form, every = mode.value === 'every';
@@ -447,6 +583,13 @@ panel.addEventListener('change', e => {
 });
 let logTimer;
 panel.addEventListener('input', e => {
+  const tf = e.target.closest('[data-form="theme"]');
+  if (tf && !e.target.matches('[data-bg-file]')) {
+    if (e.target.name === 'base' && !tf.dataset.panelTouched) tf.elements.panel.value = cfg.appearance.base_panel[e.target.value];
+    if (e.target.name === 'panel') tf.dataset.panelTouched = '1';
+    previewTheme(tf);
+    return;
+  }
   const lq = e.target.closest('[data-log-q]');
   if (lq) { clearTimeout(logTimer); logTimer = setTimeout(() => { logf.q = lq.value.trim(); paintMaint().catch(err => toast(err.message)); }, 300); return; }
   const box = e.target.closest('[data-artist-filter]');
@@ -463,11 +606,19 @@ panel.addEventListener('click', e => {
   const d = b.dataset;
   switch (b.dataset.do) {
     case 'cancel': editing = null; render(); break;
+    case 'use-theme': useTheme(d.id, cfg.appearance.themes); render(); toast('Theme set for this device'); break;
+    case 'new-theme': editing = { kind: 'theme', id: 'new', seed: { base: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark' } }; render(); $('[data-form="theme"] [name=name]')?.focus(); previewTheme($('[data-form="theme"]')); break;
+    case 'edit-theme': editing = { kind: 'theme', id: d.id }; render(); previewTheme($('[data-form="theme"]')); break;
+    case 'copy-theme': { const t = cfg.appearance.themes.find(x => x.id === d.id); editing = { kind: 'theme', id: 'new', seed: { ...t, id: '', name: `${t.name} copy`.slice(0, 40) } }; render(); previewTheme($('[data-form="theme"]')); break; }
+    case 'delete-theme': if (confirm(`Delete the “${d.name}” theme? Any device using it goes back to Dark.`)) run(() => api.del(`/api/owner/appearance/themes/${d.id}`), 'Theme deleted'); break;
+    case 'panel-reset': { const f = b.closest('form'); f.elements.panel.value = cfg.appearance.base_panel[f.elements.base.value]; previewTheme(f); break; }
+    case 'bg-remove': { const f = b.closest('form'); f.elements.bg_file.value = ''; $('.bgpick__thumb', f).innerHTML = '<span>None</span>'; b.hidden = true; previewTheme(f); break; }
     case 'new-link': editing = { kind: 'link', id: 'new' }; render(); $('[data-form="link"] input')?.focus(); break;
     case 'edit-link': editing = { kind: 'link', id: Number(d.id) }; render(); break;
     case 'new-project': editing = { kind: 'project', id: 'new' }; render(); $('[data-form="project"] input')?.focus(); break;
     case 'edit-project': editing = { kind: 'project', id: d.id }; render(); break;
     case 'pin-link': run(() => api.post(`/api/owner/links/${d.id}/pin`, { pinned: d.to === 'true' }), d.to === 'true' ? 'Pinned' : 'Unpinned'); break;
+    case 'launchpad-project': run(() => api.post(`/api/owner/projects/${d.id}/launchpad`, { show: d.to === 'true' }), d.to === 'true' ? 'Added to the Launchpad' : 'Taken off the Launchpad'); break;
     case 'pin-project': run(() => api.post(`/api/owner/projects/${d.id}/pin`, { pinned: d.to === 'true' }), d.to === 'true' ? 'Pinned' : 'Unpinned'); break;
     case 'new-gig': editing = { kind: 'gig', id: 'new' }; render(); $('[data-form="gig"] input')?.focus(); break;
     case 'edit-gig': editing = { kind: 'gig', id: Number(d.id) }; render(); break;
@@ -507,6 +658,17 @@ panel.addEventListener('click', e => {
     case 'log-level': logf.level = d.level; run(async () => {}); break;
     case 'log-clear': if (confirm('Clear the whole event log?')) run(() => api.del('/api/owner/logs'), 'Log cleared'); break;
     case 'add-cal': $('#cals').insertAdjacentHTML('beforeend', calRow()); break;
+    case 'sc-add': $('#scs').insertAdjacentHTML('beforeend', scRow()); $('#scs [data-sc]:last-child [name=sc_label]')?.focus(); break;
+    case 'sc-remove': b.closest('[data-sc]').remove(); break;
+    case 'sc-up': { const r = b.closest('[data-sc]'); if (r.previousElementSibling) r.previousElementSibling.before(r); break; }
+    case 'sc-down': { const r = b.closest('[data-sc]'); if (r.nextElementSibling) r.nextElementSibling.after(r); break; }
+    case 'sc-import': {
+      const have = new Set($$('[data-sc] [name=sc_url]').map(i => i.value.trim()));
+      const fresh = cfg.links.filter(l => !have.has(l.url));
+      fresh.forEach(l => $('#scs').insertAdjacentHTML('beforeend', scRow({ label: l.name, url: l.url, icon_mode: 'site' })));
+      toast(fresh.length ? `Added ${fresh.length} — press Save to keep them` : 'Every link is already here');
+      break;
+    }
     case 'remove-cal': b.closest('[data-cal]').remove(); break;
     case 'new-enrol': run(async () => { enrol = await api.post('/api/owner/devices/enrol', { role: 'owner', name: 'New owner device' }); }); break;
     case 'rename-device': { const n = prompt('Name this device', d.name); if (n?.trim()) run(() => api.patch(`/api/owner/devices/${d.id}`, { name: n.trim() }), 'Renamed'); break; }
@@ -537,13 +699,26 @@ panel.addEventListener('submit', e => {
     try { env = parseEnv(val(f, 'env')); } catch (err) { toast(err.message); return; }
     const body = { name: val(f, 'name'), description: val(f, 'description'), kind: val(f, 'kind'), url: val(f, 'url') || null,
       port: val(f, 'port') ? Number(val(f, 'port')) : null, cwd: val(f, 'cwd'), command: val(f, 'command'), env, lan_visible: !on(f, 'local_only'), enabled: on(f, 'enabled'), pinned: on(f, 'pinned'),
-      show_projects: on(f, 'show_projects'), show_launchpad: on(f, 'show_launchpad'), icon: val(f, 'icon') };
+      show_projects: on(f, 'show_projects'), show_launchpad: on(f, 'show_launchpad'), icon: val(f, 'icon'), for_music: on(f, 'for_music'), for_sql: on(f, 'for_sql') };
     const slug = f.dataset.slug;
     run(async () => {
       const res = await (slug ? api.put(`/api/owner/projects/${slug}`, body) : api.post('/api/owner/projects', { ...body, slug: val(f, 'slug') }));
       editing = null;
       if (res.warnings?.length) setTimeout(() => toast(res.warnings.join(' ')), 300);
     }, 'Project saved');
+  } else if (kind === 'theme') {
+    const t = readTheme(f), id = f.dataset.id;
+    run(async () => {
+      const saved = await (id ? api.put(`/api/owner/appearance/themes/${id}`, t) : api.post('/api/owner/appearance/themes', t));
+      editing = null;
+      if (!id) useTheme(saved.id, [saved]);                // a brand-new theme: use it here straight away
+    }, id ? 'Theme saved' : 'Theme created — now in use on this device');
+  } else if (kind === 'shortcuts') {
+    const shortcuts = $$('[data-sc]', f).map(r => ({
+      id: r.dataset.id || undefined, label: r.querySelector('[name=sc_label]').value.trim(), url: r.querySelector('[name=sc_url]').value.trim(),
+      icon_mode: r.querySelector('[name=sc_mode]').value, icon: r.querySelector('[name=sc_icon]').value, image: r.querySelector('[name=sc_image]').value.trim(),
+    })).filter(x => x.url || x.label);                                        // an untouched "Add shortcut" row is ignored
+    run(() => api.put('/api/owner/widgets/shortcuts/settings', { show: on(f, 'sc_show'), shortcuts }), 'Shortcuts saved — fetching icons');
   } else if (kind === 'bins') {
     run(() => api.put('/api/owner/widgets/bins/settings', { uprn: val(f, 'uprn'), put_out_hour: Number(val(f, 'put_out_hour')),
       alert_streams: Object.keys(cfg.streams).filter(k => on(f, `stream_${k}`)) }), 'Bins saved — syncing');

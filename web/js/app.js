@@ -3,8 +3,8 @@ import * as api from './api.js';
 import { cards, ui, selectedSlug } from './cards.js';
 import { newsDef, newsUi, vinylUi } from './content-cards.js';
 import { Shell } from './shell.js';
-import { $, $$, esc, ico, tickClock, tickUptimes, toast } from './util.js';
-import { initThemeToggle, toggleTheme, currentTheme } from './theme.js';
+import { $, $$, esc, hostUrl, ico, tickClock, tickUptimes, toast } from './util.js';
+import { BUILTIN, chosen, currentLook, currentTheme, specOf, syncThemes, useTheme } from './theme.js';
 
 let state = null;
 const shell = new Shell($('#grid'), cards, id => renderCard(id));
@@ -63,29 +63,78 @@ function setMediaSrc() {
 // current theme before its own first paint); live theme changes after this point go via postMessage
 // instead, in the [data-theme-toggle] click handler below, since the iframe's src is never reassigned.
 const musicFrame = $('#music-frame');
-const MUSIC_ORIGIN = 'http://192.168.0.66:8642';
+let MUSIC_ORIGIN = 'http://192.168.0.66:8642';
 let musicSrcSet = false;
+
+/** Where an embedded page comes from: a link marked for it, or a project marked for it (Settings → Projects), so
+ * an app doesn't have to be a Launchpad link just to be embedded. A project's address may say {host}. */
+function pageUrl(flag) {
+  const link = state.links.find(l => l[flag]);
+  if (link) return link.url;
+  const proj = state.projects.find(p => p[flag] && p.url);
+  // {host} becomes the PC's network address, not whatever Citadel was opened as (e.g. localhost): the CSP's
+  // frame-src, and the embedded pages' own check of who is messaging them, are both keyed to that address.
+  return proj ? hostUrl(proj.url.replace('{host}', state.ip || location.hostname)) : null;
+}
 function setMusicSrc() {
   if (musicSrcSet) return;
-  const link = state.links.find(l => l.for_music);
-  if (!link) return;
-  const sep = link.url.includes('?') ? '&' : '?';
-  musicFrame.src = `${link.url}${sep}theme=${currentTheme()}`;
+  const url = pageUrl('for_music');
+  if (!url) return;
+  const sep = url.includes('?') ? '&' : '?';
+  musicFrame.src = `${url}${sep}theme=${currentTheme()}`;
+  try { MUSIC_ORIGIN = new URL(url).origin; } catch { /* keep the default */ }
   musicSrcSet = true;
 }
 
 // Same "set once" idea again, for the SQL DB page's iframe (Music DB Explorer).
 const sqlFrame = $('#sql-frame');
-let sqlSrcSet = false;
+let sqlSrcSet = false, sqlOrigin = null;
+
+// The two embedded pages follow Citadel's theme, custom colours and background included: told on every load of
+// theirs (the ?theme= param alone can't carry a custom theme) and on every change here.
+function tellFrames() {
+  const look = currentLook();
+  if (musicSrcSet) musicFrame.contentWindow?.postMessage(look, MUSIC_ORIGIN);
+  if (sqlSrcSet && sqlOrigin) sqlFrame.contentWindow?.postMessage(look, sqlOrigin);
+}
+musicFrame.addEventListener('load', tellFrames);
+sqlFrame.addEventListener('load', tellFrames);
 function setSqlSrc() {
   if (sqlSrcSet) return;
-  const link = state.links.find(l => l.for_sql);
-  if (!link) return;
-  sqlFrame.src = link.url;
+  const url = pageUrl('for_sql');
+  if (!url) return;
+  const sep = url.includes('?') ? '&' : '?';
+  sqlFrame.src = `${url}${sep}theme=${currentTheme()}`;
+  try { sqlOrigin = new URL(url).origin; } catch { sqlOrigin = null; }
   sqlSrcSet = true;
 }
 
+// The shortcut row across the top (Settings → Widgets → Shortcuts): invisible until something is configured,
+// or when it's switched off there. Links open in a new tab.
+let shortcutsKey = null;
+function scIcon(s) {
+  const letter = `<span class="sc__letter" aria-hidden="true">${esc((s.label || new URL(s.url).hostname).trim().charAt(0).toUpperCase())}</span>`;
+  if (s.icon_mode === 'builtin') return ico(s.icon);
+  if (s.img) return `<img class="sc__img" src="${esc(s.img)}" alt="" loading="lazy" decoding="async">`;
+  return letter;
+}
+function renderShortcuts() {
+  const w = state.widgets?.shortcuts?.data;
+  const list = w && w.show ? w.shortcuts : [];
+  const nav = $('#shortcuts');
+  const key = JSON.stringify(list);
+  if (key === shortcutsKey) return;                  // nothing changed: don't rebuild (keeps hover/focus steady)
+  shortcutsKey = key;
+  nav.hidden = !list.length;
+  nav.innerHTML = list.map(s => {
+    let host = s.url;
+    try { host = new URL(s.url).host; } catch { /* shown as given */ }
+    return `<a class="sc${s.label ? '' : ' sc--bare'}" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" title="${esc(s.label ? `${s.label} — ${host}` : host)}">${scIcon(s)}${s.label ? `<span class="sc__label">${esc(s.label)}</span>` : ''}</a>`;
+  }).join('');
+}
+
 function renderAll() {
+  renderShortcuts();
   cards.forEach(c => renderCard(c.id));
   renderCard('news');
   renderAlerts();
@@ -119,13 +168,35 @@ function route() {
 addEventListener('hashchange', route);
 route();
 
+// The header's theme button opens a small menu: Dark, Light and any custom themes (Settings → Appearance).
 const themeBtn = $('[data-theme-toggle]');
-if (themeBtn) initThemeToggle(themeBtn);
+themeBtn?.setAttribute('aria-haspopup', 'menu');
+themeBtn?.setAttribute('aria-expanded', 'false');
+themeBtn?.setAttribute('title', 'Theme');
+themeBtn?.setAttribute('aria-label', 'Theme');
+function swatch(t) {
+  if (!t.accent) return `<span class="tm__sw tm__sw--${t.id}"></span>`;
+  const s = specOf(t);
+  return `<span class="tm__sw" style="--sw-bg:${esc(t.panel)};--sw-ac:${esc(t.accent)}">${s.bg ? `<img src="/backgrounds/${esc(t.background.file)}" alt="">` : ''}</span>`;
+}
+function closeThemeMenu() { $('#theme-menu')?.remove(); themeBtn?.setAttribute('aria-expanded', 'false'); }
+function openThemeMenu() {
+  const themes = state?.appearance?.themes || [], cur = chosen();
+  const item = t => `<button type="button" role="menuitemradio" aria-checked="${t.id === cur}" data-use-theme="${esc(t.id)}">${swatch(t)}<span>${esc(t.name)}</span>${t.id === cur ? ico('check') : ''}</button>`;
+  const menu = document.createElement('div');
+  menu.id = 'theme-menu'; menu.className = 'tm'; menu.setAttribute('role', 'menu');
+  menu.innerHTML = [...BUILTIN, ...themes].map(item).join('') + '<a class="tm__more" href="/settings#appearance">Customise…</a>';
+  themeBtn.after(menu);
+  themeBtn.setAttribute('aria-expanded', 'true');
+  menu.querySelector('[aria-checked="true"]')?.focus();
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#theme-menu')) { closeThemeMenu(); themeBtn?.focus(); } });
+document.addEventListener('theme:change', tellFrames);
 
 let loading = null;
 async function load() {
   if (loading) return loading;                       // coalesce bursts of events into one fetch
-  loading = api.get('/api/owner/state').then(s => { state = s; renderAll(); }).catch(e => console.error(e)).finally(() => { loading = null; });
+  loading = api.get('/api/owner/state').then(s => { state = s; syncThemes(s.appearance?.themes); renderAll(); }).catch(e => console.error(e)).finally(() => { loading = null; });
   return loading;
 }
 let debounce;
@@ -135,10 +206,12 @@ const changed = () => { clearTimeout(debounce); debounce = setTimeout(load, 250)
 document.addEventListener('click', async e => {
   const themeToggle = e.target.closest('[data-theme-toggle]');
   if (themeToggle) {
-    toggleTheme(themeToggle);
-    if (musicSrcSet) musicFrame.contentWindow.postMessage({ type: 'citadel-theme', theme: currentTheme() }, MUSIC_ORIGIN);
+    if ($('#theme-menu')) closeThemeMenu(); else openThemeMenu();
     return;
   }
+  const use = e.target.closest('[data-use-theme]');
+  if (use) { useTheme(use.dataset.useTheme, state?.appearance?.themes); closeThemeMenu(); return; }
+  if ($('#theme-menu') && !e.target.closest('#theme-menu')) closeThemeMenu();
   const pin = e.target.closest('[data-pin]');
   if (pin) {                                                                // pin / unpin a link or project
     const { pin: kind, id, to } = pin.dataset;

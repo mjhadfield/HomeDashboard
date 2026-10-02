@@ -720,3 +720,27 @@ def test_check_endpoint_accepts_juno_sections_but_not_a_list_for_shopify(owner_c
     assert r.status_code == 200 and r.json()["kind"] == "juno" and r.json()["collection"] == "metal,rock"
     assert owner_client.post("/api/owner/shops/check", json={"url": "https://a.example", "collection": "metal,rock"}).status_code == 422
     assert owner_client.post("/api/owner/shops/check", json={"url": "https://a.example", "kind": "wordpress"}).status_code == 422
+
+
+# ======================================================= Confirmed Pre-orders: a hand-set release date
+
+def test_a_release_date_set_by_hand_survives_the_next_store_sync(owner_client):
+    item = {"external_id": "earache:lamb-of-god:sacrament", "artist": "Lamb Of God", "title": "Sacrament", "url": "https://earache.example/x", "date": None, "meta": {}}
+    content.upsert_items("vinyl", "earache", [item], baseline=True)
+    iid = content.list_items("vinyl")["items"][0]["id"]
+    content.set_status(iid, "purchased")
+    assert owner_client.patch(f"/api/owner/items/{iid}/date", json={"date": "2026-11-27"}).status_code == 200
+
+    content.upsert_items("vinyl", "earache", [item], baseline=False)            # the store still says TBC
+    assert content.list_purchased("vinyl")[0]["date"] == "2026-11-27"            # the hand-set date stays
+
+    owner_client.patch(f"/api/owner/items/{iid}/date", json={"date": None})      # back to TBC by hand…
+    content.upsert_items("vinyl", "earache", [{**item, "date": "2026-12-04"}], baseline=False)
+    assert content.list_purchased("vinyl")[0]["date"] == "2026-12-04"            # …so a date the store publishes comes through again
+
+
+def test_store_dates_still_update_when_nobody_has_set_one():
+    item = {"external_id": "earache:x:y", "artist": "X", "title": "Y", "url": "https://earache.example/y", "date": None, "meta": {}}
+    content.upsert_items("vinyl", "earache", [item], baseline=True)
+    content.upsert_items("vinyl", "earache", [{**item, "date": "2027-01-15"}], baseline=False)
+    assert content.list_items("vinyl")["items"][0]["date"] == "2027-01-15"

@@ -6,7 +6,7 @@ import html
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -33,7 +33,7 @@ for _noisy in ("httpx", "httpcore"):
 # own pages ever creates an iframe pointed at it directly -- Companion's own settings-icon link navigates the
 # *existing* #music-frame iframe to it, and frame-src also governs subsequent navigations of a nested browsing
 # context, not just its initial src.
-CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://coverartarchive.org https://archive.org https://*.archive.org; "
+CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
@@ -110,6 +110,36 @@ app.mount("/static", NoCacheStatic(directory=config.WEB_DIR), name="static")
 # directory is created lazily on first use, so check_dir=False avoids a startup dependency on it existing yet.
 (config.DATA_DIR / "covers").mkdir(parents=True, exist_ok=True)
 app.mount("/covers", NoCacheStatic(directory=config.DATA_DIR / "covers"), name="covers")
+
+
+# Shortcut icons (widgets/shortcuts.py), downloaded server-side for the same CSP reason. Only plain file names the
+# widget itself wrote are served, owner-only, and with a sandboxing CSP of their own: a site's SVG icon could carry
+# script, which an <img> never runs, but opening the file directly would otherwise run it as Citadel.
+from .widgets import shortcuts as _shortcuts   # noqa: E402
+
+
+from . import appearance as _appearance   # noqa: E402
+
+
+@app.get("/backgrounds/{name}", include_in_schema=False)
+async def background_picture(name: str, request: Request):
+    """Custom themes' background pictures (Settings → Appearance): owner-only, plain names only, content-addressed."""
+    auth.require_owner(request)
+    path = _appearance.bg_dir() / name
+    if not _appearance.BG_NAME_RE.fullmatch(name) or not path.is_file():
+        raise HTTPException(404, "no such picture")
+    return FileResponse(path, media_type=_appearance.MEDIA_TYPES[name.rsplit(".", 1)[1]],
+                        headers={"Cache-Control": "private, max-age=31536000, immutable", "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@app.get("/shortcut-icons/{name}", include_in_schema=False)
+async def shortcut_icon(name: str, request: Request):
+    auth.require_owner(request)
+    path = _shortcuts.icon_dir() / name
+    if not _shortcuts.ICON_NAME_RE.fullmatch(name) or not path.is_file():
+        raise HTTPException(404, "no such icon")
+    return FileResponse(path, media_type=_shortcuts.MEDIA_TYPES[name.rsplit(".", 1)[1]],
+                        headers={"Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"})
 
 
 @app.middleware("http")

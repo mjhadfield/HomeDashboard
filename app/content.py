@@ -70,7 +70,8 @@ def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baselin
                 "INSERT INTO feed_items (kind, source, external_id, artist, title, subtitle, url, date, meta, status, first_seen, last_seen) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(kind, source, external_id) DO UPDATE SET artist = excluded.artist, title = excluded.title, subtitle = excluded.subtitle, "
-                "url = excluded.url, date = excluded.date, meta = excluded.meta, last_seen = excluded.last_seen",
+                "url = excluded.url, date = CASE WHEN feed_items.date_set = 1 THEN feed_items.date ELSE excluded.date END, "   # a hand-set date wins
+                "meta = excluded.meta, last_seen = excluded.last_seen",
                 (kind, source, it["external_id"], it.get("artist"), it["title"][:300], (it.get("subtitle") or "")[:300], it.get("url"), it.get("date"),
                  json.dumps(it.get("meta") or {}), "seen" if baseline else "new", now, now),
             )
@@ -152,8 +153,10 @@ def add_manual_purchase(kind: str, *, artist: str, title: str, variant: str, dat
 
 
 def set_date(item_id: int, date: str | None) -> bool:
+    """A release date set by hand. It's kept through later syncs (upsert_items won't overwrite it); clearing it hands
+    the date back to the store."""
     with db() as con:
-        return con.execute("UPDATE feed_items SET date = ? WHERE id = ?", (date, item_id)).rowcount > 0
+        return con.execute("UPDATE feed_items SET date = ?, date_set = ? WHERE id = ?", (date, int(date is not None), item_id)).rowcount > 0
 
 
 def delete_item(item_id: int) -> bool:

@@ -10,16 +10,22 @@ Titles, artists and prices come straight from the store. Release dates are only 
 
 Juno is not Shopify: it is read from its public pre-order listing pages (metal, rock, punk…), politely — paced by the
 Crawl-delay in its robots.txt, only pages robots.txt allows, and at most once a day.
+
+Wix stores (Nesi Media) have no catalogue feed, so the whole shop is watched instead of a pre-order list: the product
+sitemap (one request) names every product page; only pages whose address starts with an artist you follow are read,
+slowly, and each page's standard schema.org product data gives the title, price, stock and artwork.
 """
 from __future__ import annotations
 
 import asyncio
+import html
+import json
 import logging
 import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.robotparser import RobotFileParser
 from uuid import uuid4
 
@@ -40,12 +46,13 @@ DEFAULT_SHOPS = [   # checked against the live stores; order = priority when the
     {"id": "deathwish", "name": "Deathwish", "url": "https://www.deathwishinc.com", "collection": "pre-order", "enabled": True},
     {"id": "crash-records", "name": "Crash Records", "url": "https://www.crashrecords.co.uk", "collection": "music-pre-orders", "enabled": True},   # GBP; general record shop (not metal-specific), by far the biggest catalogue here
     {"id": "juno", "name": "Juno", "url": "https://www.juno.co.uk", "kind": "juno", "collection": "metal,rock,punk-hardcore", "enabled": True},   # GBP; HTML listing, not Shopify
+    {"id": "nesi-media", "name": "Nesi Media", "url": "https://www.nesimedia.com", "kind": "wix", "collection": "", "enabled": True},   # HKD; Hong Kong label (licensed variants); Wix, whole shop — not just pre-orders
     {"id": "nuclear-blast-us", "name": "Nuclear Blast (US)", "url": "https://shop.nuclearblast.com", "collection": "pre-order", "enabled": False},   # mostly the EU catalogue again
 ]
 JUNO_EVERY_HOURS = 24            # a full Juno pass is ~100 polite page requests, so it runs at most this often
 JUNO_MAX_PAGES = 60              # per section (50 records a page)
-IMAGE_HOSTS = {"cdn.shopify.com", "imagescdn.juno.co.uk"}      # artwork is only ever loaded from these (the page's CSP allows just them)
-SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "CAD": "CA$", "AUD": "A$"}
+IMAGE_HOSTS = {"cdn.shopify.com", "imagescdn.juno.co.uk", "static.wixstatic.com"}      # artwork is only ever loaded from these (the page's CSP allows just them)
+SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "CAD": "CA$", "AUD": "A$", "HKD": "HK$"}
 VINYL_RE = re.compile(r'vinyl|\bLPs?\b|\b\dx?LP\b|\b12"|\b10"|\b7"|picture ?disc', re.I)
 NOT_MUSIC_RE = re.compile(r"\b(?:t-?shirts?|hoodies?|sweatshirts?|longsleeves?|jackets?|posters?|patch(?:es)?|flags?|slipmats?|beanies?|caps?|totes?|mugs?|pins?|stickers?|puzzles?|books?|blankets?|dresses|shorts|socks)\b", re.I)
 PREORDER_RE = re.compile(r"pre-?orders?", re.I)
@@ -299,7 +306,9 @@ def product_url(shop: dict[str, Any], p: dict[str, Any]) -> str:
 
 def build_items(products: list[dict[str, Any]], shop: dict[str, Any], followed: dict[str, str], *, currency: str, today: date) -> list[dict[str, Any]]:
     """Store products -> one item per (artist, album): vinyl only, on pre-order, by someone you follow, still available."""
-    need_flag = shop.get("kind") != "juno" and not shop.get("collection")     # a pre-order collection means everything in it is a pre-order
+    # a pre-order collection means everything in it is a pre-order; Juno is read from its pre-order pages; a Wix shop is
+    # watched whole (anything by a followed artist that's for sale, in stock or on pre-order)
+    need_flag = shop.get("kind") not in ("juno", "wix") and not shop.get("collection")
     matched: list[tuple[str, str, dict[str, Any]]] = []
     for p in products:
         if not is_vinyl(p) or (need_flag and not has_preorder_flag(p)):
@@ -335,7 +344,8 @@ def build_items(products: list[dict[str, Any]], shop: dict[str, Any], followed: 
         if fmt == "Vinyl":                              # …or its tags (Crash Records puts the format there, e.g. "LP (Album)")
             t = ps[0].get("tags") or []
             fmt = format_label(" ".join(t) if isinstance(t, list) else str(t))
-        subtitle = " · ".join(x for x in (fmt, f"{n} variants" if n > 1 else "", f"from {price_text}" if n > 1 and price_text else price_text, shop["name"]) if x)
+        stock = ps[0].get("_stock") or ""               # only whole-shop stores say: "in stock" / "pre-order"
+        subtitle = " · ".join(x for x in (fmt, f"{n} variants" if n > 1 else "", f"from {price_text}" if n > 1 and price_text else price_text, stock, shop["name"]) if x)
         vendor = str(ps[0].get("_label") or ps[0].get("vendor") or "").strip()
         editions = [{"name": edition_of(p.get("title", "")) or p.get("_edition") or "Standard", "price": money(_price(p)), "url": product_url(shop, p)}
                     for p in ps[:8]]
@@ -432,6 +442,109 @@ async def fetch_juno(client: httpx.AsyncClient, shop: dict[str, Any], *, max_pag
     return list(seen.values())
 
 
+# ---- Wix (whole shop, from the product sitemap) ---------------------------------------------------------------------------
+
+WIX_MAX_PAGES = 100             # product pages read per pass, at most (newest first)
+SITEMAP_URL_RE = re.compile(r"<url>\s*<loc>([^<]+)</loc>(?:\s*<lastmod>([^<]+)</lastmod>)?", re.S)
+LD_JSON_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+FOR_SALE = ("InStock", "PreOrder", "PreSale", "LimitedAvailability", "OnlineOnly")
+INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")      # e.g. the left-to-right mark in "Children Of Bodom \u200e- Hatebreeder"
+# Nesi titles run the edition straight on from the album: "Will To Power Golden Vinyl LP", "Ategnatos Splatter Vinyl 2LP
+# China Version". Cut at the first edition word; a colour/effect/version word only counts when a format word follows it
+# later, so an album like "White Pony" (in "White Pony White Vinyl") keeps its name.
+WIX_EDITION = re.compile(r"\s+(?:(?:Ltd|Limited)\b|\d*x?LP\b|\d+\"|Vinyl\b|(?:Golden|Gold|Silver|Splatter|Swirl|Smok(?:e|ing|y)|Floating|Liquid|Sand|Clear|"
+                         r"Transparent|Colou?r(?:ed)?|Picture|Marble|Black|White|Red|Blue|Green|Purple|Yellow|Orange|Pink|Grey|Gray|"
+                         r"Swedish|English|China|Chinese|Japan(?:ese)?)\b(?=.*\b(?:Vinyl|LP|Version)\b))", re.I)
+
+
+def wix_album(album: str) -> str:
+    for m in WIX_EDITION.finditer(album):
+        if album[:m.start()].strip():
+            return album[:m.start()].strip(" -–—:,/")
+    return album.strip()
+
+
+def slug_of(name: str) -> str:
+    """How a shop turns a name into the start of a product address: 'At the Gates' -> 'at-the-gates', 'Bæst' -> 'bæst'."""
+    return re.sub(r"[^\w]+", "-", name.lower()).strip("-")
+
+
+def wix_candidates(sitemap: str, followed: dict[str, str]) -> list[tuple[str, str]]:
+    """(product page, last changed) for every product whose address starts with a followed artist's name, newest first.
+    Only a first cut: the real title decides (see match_artist), so 'ghost-bath-…' is read but never counted as Ghost."""
+    prefixes = set()
+    for name in followed.values():
+        s = slug_of(name)
+        prefixes |= {s, re.sub(r"^the-", "", s)}          # 'The X' is often filed as 'X'
+    prefixes.discard("")
+    out = []
+    for loc, lastmod in SITEMAP_URL_RE.findall(sitemap):
+        loc = html.unescape(loc.strip())
+        slug = re.sub(r"^(?:copy-of-)+", "", unquote(loc.rstrip("/").rsplit("/", 1)[-1]).lower())   # Wix names duplicated products 'Copy of …'
+        if any(slug == p or slug.startswith(p + "-") for p in prefixes):
+            out.append((loc, (lastmod or "").strip()))
+    return sorted(out, key=lambda x: x[1], reverse=True)
+
+
+def parse_wix_product(page: str, url: str, lastmod: str = "") -> dict[str, Any] | None:
+    """A product page's schema.org Product data -> a product in the shape build_items expects. None if there isn't one."""
+    for m in LD_JSON_RE.finditer(page):
+        try:
+            data = json.loads(m.group(1))
+        except ValueError:
+            continue
+        for d in data if isinstance(data, list) else [data]:
+            if not isinstance(d, dict) or d.get("@type") != "Product" or not d.get("name"):
+                continue
+            offer = d.get("offers") or {}
+            offer = (offer[0] if offer else {}) if isinstance(offer, list) else offer
+            images = d.get("image") or []
+            first = (images[0] if isinstance(images, list) and images else images) or {}
+            img = first.get("contentUrl") if isinstance(first, dict) else first
+            desc = html.unescape(str(d.get("description") or ""))
+            brand = d.get("brand") or {}
+            title = re.sub(r"\s+", " ", INVISIBLE.sub("", html.unescape(d["name"]))).strip()
+            return {"id": url, "title": title, "_album": wix_album(parse_title(title)[1]), "product_type": "", "tags": [],
+                    "_label": brand.get("name", "") if isinstance(brand, dict) else str(brand),
+                    "variants": [{"price": str(offer.get("price") or ""), "available": str(offer.get("availability") or "").rsplit("/", 1)[-1] in FOR_SALE}],
+                    "_currency": str(offer.get("priceCurrency") or ""), "_url": url, "images": [{"src": img}] if isinstance(img, str) else [],
+                    "body_html": desc, "published_at": lastmod,
+                    "_stock": "pre-order" if PREORDER_RE.search(f"{title} {desc}") else "in stock"}
+    return None
+
+
+async def fetch_wix(client: httpx.AsyncClient, shop: dict[str, Any], followed: dict[str, str], *, max_pages: int = WIX_MAX_PAGES, sleep=None) -> list[dict[str, Any]]:
+    """Read the product sitemap, then (slowly, as robots.txt allows) the product pages of followed artists."""
+    base = shop["url"].rstrip("/")
+    robots = RobotFileParser()
+    resp = await client.get(f"{base}/robots.txt")
+    robots.parse(resp.text.splitlines() if resp.status_code == 200 else [])
+    delay = max(float(robots.crawl_delay(USER_AGENT) or 0), 2.0)
+    sitemap_url = f"{base}/store-products-sitemap.xml"
+    if not robots.can_fetch(USER_AGENT, sitemap_url):
+        raise RuntimeError(f"robots.txt doesn't allow {sitemap_url}")
+    r = await client.get(sitemap_url)
+    r.raise_for_status()
+    if not SITEMAP_URL_RE.search(r.text):
+        # an empty product sitemap means the shop changed, not that it sells nothing: don't wipe what was found before
+        raise RuntimeError(f"{shop['name']}'s product sitemap had no products — has the shop moved?")
+    wanted = wix_candidates(r.text, followed)
+    if len(wanted) > max_pages:
+        log.warning("%s: %d product pages match followed artists; reading the newest %d", shop["name"], len(wanted), max_pages)
+    out = []
+    for url, lastmod in wanted[:max_pages]:
+        if not robots.can_fetch(USER_AGENT, url):
+            continue
+        await (sleep or asyncio.sleep)(delay)
+        page = await client.get(url)
+        if page.status_code in (404, 410):
+            continue                                   # the sitemap can lag a deleted product
+        page.raise_for_status()
+        if p := parse_wix_product(page.text, url, lastmod):
+            out.append(p)
+    return out
+
+
 _currency_cache: dict[str, str] = {}
 
 
@@ -465,6 +578,17 @@ async def check_shop(url: str, collection: str, kind: str = "shopify") -> dict[s
     """For Settings → 'Check this store': is it a store we can read, and what does its pre-order list look like?"""
     shop = {"url": url, "collection": collection or "", "id": "check", "name": "check", "kind": kind}
     async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=25, follow_redirects=True) as client:
+        if kind == "wix":                                             # the sitemap alone says how much would be read
+            try:
+                r = await client.get(f"{url.rstrip('/')}/store-products-sitemap.xml")
+                r.raise_for_status()
+            except httpx.HTTPError as exc:
+                return {"ok": False, "error": f"Couldn't read a Wix product sitemap there ({type(exc).__name__})."}
+            followed = {key(a["name"]): a["name"] for a in content.list_artists() if a["status"] != "mute"}
+            total, wanted = len(SITEMAP_URL_RE.findall(r.text)), wix_candidates(r.text, followed)
+            return {"ok": bool(total), "products": total, "vinyl_preorders": len(wanted), "currency": "", "sample": [u.rsplit("/", 1)[-1][:70] for u, _ in wanted[:4]],
+                    "note": f"Whole shop, not just pre-orders: {min(len(wanted), WIX_MAX_PAGES)} product pages by artists you follow would be read, a couple of seconds apart, once a day.",
+                    **({} if total else {"error": "That sitemap lists no products."})}
         if kind == "juno":                                            # one page of the first section is enough to tell
             section = (collection.split(",")[0].strip() if collection else "") or "metal"
             try:
@@ -534,7 +658,7 @@ class VinylWidget(Widget):
             for s in shops:
                 name, url, coll = str(s.get("name", "")).strip()[:40], str(s.get("url", "")).strip(), str(s.get("collection", "")).strip()
                 kind = s.get("kind") or "shopify"
-                if kind not in ("shopify", "juno"):
+                if kind not in ("shopify", "juno", "wix"):
                     raise ValueError("unknown store type")
                 if not name:
                     raise ValueError("every store needs a name")
@@ -546,6 +670,8 @@ class VinylWidget(Widget):
                     if not sections or len(sections) > 8 or not all(JUNO_SECTION_RE.fullmatch(x) for x in sections):
                         raise ValueError("Juno sections are genre names from its address, e.g. metal,rock,punk-hardcore")
                     coll = ",".join(sections)
+                elif kind == "wix":
+                    coll = ""                                     # a Wix shop is watched whole
                 elif coll and not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,80}", coll):
                     raise ValueError("collection must be the handle from the store's address, e.g. pre-orders")
                 sid = re.sub(r"[^a-z0-9-]+", "-", str(s.get("id") or name).lower()).strip("-")[:40] or "shop"
@@ -571,6 +697,9 @@ class VinylWidget(Widget):
                             continue
                         products = await fetch_juno(client, shop)
                         currency = "GBP"
+                    elif shop.get("kind") == "wix":
+                        products = await fetch_wix(client, shop, followed)
+                        currency = next((p["_currency"] for p in products if p.get("_currency")), "")
                     else:
                         products = await fetch_products(client, shop, settings["max_pages"])
                         if not products:                                  # a store that suddenly lists nothing: renamed collection? keep what we have

@@ -118,6 +118,24 @@ body {
   background-attachment: fixed;
 }
 
+/* Custom themes (Settings → Appearance, applied by theme.js): a background picture behind everything, dimmed
+   towards the theme's own page colour so text stays readable, and the accent glows optional. The picture sits on
+   <html> so it fills the whole window whatever the page's height; body keeps only the glows on top of it. */
+html.has-bg {
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg) var(--bg-dim, 40%), transparent), color-mix(in srgb, var(--bg) var(--bg-dim, 40%), transparent)) fixed,
+    var(--bg-image) var(--bg-pos, center) / var(--bg-size, cover) var(--bg-repeat, no-repeat) fixed,
+    var(--bg);
+}
+html.has-bg body {
+  background:
+    radial-gradient(1100px 600px at 12% -10%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 105% 105%, color-mix(in srgb, var(--accent-deep) 20%, transparent), transparent 60%);
+  background-attachment: fixed;
+}
+html.no-glow body { background: var(--bg); }
+html.has-bg.no-glow body { background: none; }
+
 /* scanline + vignette overlay: ~2% — felt more than seen */
 body::after {
   content: "";

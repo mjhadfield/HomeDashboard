@@ -284,7 +284,7 @@ async def delete_gig(gig_id: int):
 class ShopCheckIn(BaseModel):
     url: str = Field(max_length=300)
     collection: str = Field("", max_length=120)
-    kind: str = Field("shopify", pattern="^(shopify|juno)$")
+    kind: str = Field("shopify", pattern="^(shopify|juno|wix)$")
 
     @field_validator("url")
     @classmethod

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, auth, config, db, notify, procs, schemas, state
+from . import __version__, appearance, auth, config, db, notify, procs, schemas, state
 from .bus import bus
 from .health import Health
 from .widgets import discover
@@ -96,7 +96,8 @@ def _project_cfg(r: sqlite3.Row) -> dict[str, Any]:
     return {"slug": r["slug"], "name": r["name"], "description": r["description"], "kind": r["kind"], "url": r["url"] or "",
             "port": r["port"], "cwd": r["cwd"], "command": shlex.join(json.loads(r["start_argv"])), "env": json.loads(r["env"]),
             "lan_visible": bool(r["lan_visible"]), "enabled": bool(r["enabled"]), "pinned": r["pin_order"] is not None, "cwd_exists": os.path.isdir(r["cwd"]),
-            "show_projects": bool(r["show_projects"]), "show_launchpad": bool(r["show_launchpad"]), "icon": r["icon"] or ""}
+            "show_projects": bool(r["show_projects"]), "show_launchpad": bool(r["show_launchpad"]), "icon": r["icon"] or "",
+            "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"])}
 
 
 @router.get("/config")
@@ -113,6 +114,8 @@ async def get_config(request: Request):
         "devices": [{**d, "current": d["id"] == me} for d in auth.list_devices() if not d["revoked"]],
         "screens": state.tv_settings(), "tv_panels": list(schemas.TV_PANELS),
         "icons": schemas.ICONS, "streams": {k: v["title"] for k, v in STREAMS.items()}, "colours": ["violet", "silver", "indigo"],
+        "appearance": {"themes": appearance.themes(), "base_panel": appearance.BASE_PANEL, "base_accent": appearance.BASE_ACCENT,
+                       "fits": list(appearance.FITS), "max_background_mb": appearance.MAX_BACKGROUND // 1_000_000},
     }
 
 
@@ -177,6 +180,7 @@ def _apply_for_music(con: sqlite3.Connection, link_id: Any, for_music: bool) -> 
         return
     con.execute("UPDATE links SET for_music = 0 WHERE id != ?", (link_id,))
     con.execute("UPDATE links SET for_music = 1 WHERE id = ?", (link_id,))
+    con.execute("UPDATE projects SET for_music = 0")
 
 
 def _apply_for_sql(con: sqlite3.Connection, link_id: Any, for_sql: bool) -> None:
@@ -187,6 +191,20 @@ def _apply_for_sql(con: sqlite3.Connection, link_id: Any, for_sql: bool) -> None
         return
     con.execute("UPDATE links SET for_sql = 0 WHERE id != ?", (link_id,))
     con.execute("UPDATE links SET for_sql = 1 WHERE id = ?", (link_id,))
+    con.execute("UPDATE projects SET for_sql = 0")
+
+
+def _apply_page(con: sqlite3.Connection, slug: str, column: str, on: bool | None) -> None:
+    """A project as the Companion (for_music) or SQL DB (for_sql) page's source. One source per page across links
+    and projects together, so choosing a project here takes the job from whichever link or project had it."""
+    if on is None:
+        return
+    if not on:
+        con.execute(f"UPDATE projects SET {column} = 0 WHERE slug = ?", (slug,))
+        return
+    con.execute(f"UPDATE projects SET {column} = 0 WHERE slug != ?", (slug,))
+    con.execute(f"UPDATE links SET {column} = 0")
+    con.execute(f"UPDATE projects SET {column} = 1 WHERE slug = ?", (slug,))
 
 
 @router.post("/links", status_code=201)
@@ -272,6 +290,8 @@ async def create_project(body: schemas.ProjectCreate, request: Request):
             con.execute("INSERT INTO projects (slug, name, description, kind, url, port, cwd, start_argv, env, lan_visible, enabled, show_projects, show_launchpad, icon, sort) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (body.slug, *_project_values(body), sort))
             _apply_pin(con, "projects", "slug", body.slug, body.pinned)
+            _apply_page(con, body.slug, "for_music", body.for_music)
+            _apply_page(con, body.slug, "for_sql", body.for_sql)
     except sqlite3.IntegrityError:
         raise HTTPException(409, f"a project with id '{body.slug}' already exists")
     notify.config()
@@ -287,6 +307,8 @@ async def update_project(slug: str, body: schemas.ProjectIn, request: Request):
         con.execute("UPDATE projects SET name=?, description=?, kind=?, url=?, port=?, cwd=?, start_argv=?, env=?, lan_visible=?, enabled=?, show_projects=?, show_launchpad=?, icon=? WHERE slug=?",
                     (*_project_values(body), slug))
         _apply_pin(con, "projects", "slug", slug, body.pinned)
+        _apply_page(con, slug, "for_music", body.for_music)
+        _apply_page(con, slug, "for_sql", body.for_sql)
     if before["enabled"] and not body.enabled:          # hiding a project shouldn't leave it running unseen
         try:
             await procs.stop(slug)
@@ -339,6 +361,65 @@ async def pin_project(slug: str, body: schemas.PinIn):
     return {"ok": True, "pinned": body.pinned}
 
 
+@router.post("/projects/{slug}/launchpad")
+async def project_launchpad(slug: str, body: schemas.LaunchpadIn):
+    """Settings → Projects' one-click "Launchpad" toggle (the same flag the Edit form's "Show in Launchpad" sets)."""
+    _project(slug, enabled_only=False)
+    with db.db() as con:
+        con.execute("UPDATE projects SET show_launchpad = ? WHERE slug = ?", (int(body.show), slug))
+    notify.config()
+    notify.projects()
+    return {"ok": True, "show_launchpad": body.show}
+
+
+# ---- appearance (custom themes, background pictures) ---------------------------------------------
+
+@router.post("/appearance/themes", status_code=201)
+async def create_theme(body: dict[str, Any]):
+    try:
+        theme = appearance.save_theme(body)
+    except appearance.AppearanceError as exc:
+        raise HTTPException(422, str(exc).capitalize())
+    notify.config()
+    return theme
+
+
+@router.put("/appearance/themes/{theme_id}")
+async def update_theme(theme_id: str, body: dict[str, Any]):
+    try:
+        theme = appearance.save_theme(body, theme_id)
+    except LookupError:
+        raise HTTPException(404, "no such theme")
+    except appearance.AppearanceError as exc:
+        raise HTTPException(422, str(exc).capitalize())
+    notify.config()
+    return theme
+
+
+@router.delete("/appearance/themes/{theme_id}")
+async def remove_theme(theme_id: str):
+    try:
+        appearance.delete_theme(theme_id)
+    except LookupError:
+        raise HTTPException(404, "no such theme")
+    notify.config()
+    return {"ok": True}
+
+
+@router.post("/appearance/backgrounds", status_code=201)
+async def upload_background(request: Request):
+    """The picture itself is the request body (no form encoding): checked by its bytes, capped in size as it arrives."""
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > appearance.MAX_BACKGROUND:
+            raise HTTPException(413, f"Pictures up to {appearance.MAX_BACKGROUND // 1_000_000} MB, please")
+    try:
+        return {"file": appearance.store_background(bytes(data))}
+    except appearance.AppearanceError as exc:
+        raise HTTPException(422, str(exc).capitalize())
+
+
 # ---- widgets -------------------------------------------------------------------------------------
 
 @router.post("/widgets/{widget_id}/refresh", status_code=202)
@@ -365,6 +446,7 @@ async def put_widget_settings(widget_id: str, values: dict[str, Any], request: R
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     db.put_settings(w.id, merged)
+    notify.widget(w.id)                    # screens redraw with the new settings now, not only once the refresh has finished
     request.app.state.scheduler.refresh(w.id)
     return w.public_settings(merged)
 

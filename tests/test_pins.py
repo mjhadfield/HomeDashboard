@@ -158,3 +158,16 @@ def test_pin_order_is_shared_across_links_and_projects(owner_client):
     pc = next(p for p in got["projects"] if p["slug"] == proj_c)
     lb = next(l for l in got["links"] if l["id"] == link_b)
     assert pa["pin_order"] < lb["pin_order"] < pc["pin_order"]
+
+
+def test_launchpad_toggle_is_one_click_and_projects_are_off_it_by_default(owner_client, guest_client):
+    slug = mk_project(owner_client, "lp")
+    def on_lp():
+        return next(p for p in owner_client.get(f"{BASE}/config").json()["projects"] if p["slug"] == slug)["show_launchpad"]
+    assert on_lp() is False                                                    # a new project is only in Projects until you say otherwise
+    assert owner_client.post(f"{BASE}/projects/{slug}/launchpad", json={"show": True}).json() == {"ok": True, "show_launchpad": True}
+    assert on_lp() is True
+    owner_client.post(f"{BASE}/projects/{slug}/launchpad", json={"show": False})
+    assert on_lp() is False
+    assert owner_client.post(f"{BASE}/projects/pytest-nope/launchpad", json={"show": True}).status_code == 404
+    assert guest_client.post(f"{BASE}/projects/{slug}/launchpad", json={"show": True}, headers={"X-Hub": "1"}).status_code == 403

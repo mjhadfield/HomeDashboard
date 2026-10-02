@@ -75,6 +75,8 @@ class ProjectIn(BaseModel):
     lan_visible: bool = True
     enabled: bool = True
     pinned: bool | None = None
+    for_music: bool | None = None   # the Companion page embeds this project (None = leave unchanged)
+    for_sql: bool | None = None     # the SQL DB page embeds this project
     show_projects: bool = True     # the Projects card (start/stop); a standalone app with nothing to "stop" might turn this off
     show_launchpad: bool = False
     icon: str = ""       # "" = a sensible default for its kind, chosen client-side; otherwise must be a real icon
@@ -138,6 +140,10 @@ class ProjectCreate(ProjectIn):
 
 class PinIn(BaseModel):
     pinned: bool
+
+
+class LaunchpadIn(BaseModel):
+    show: bool
 
 
 class IdList(BaseModel):
