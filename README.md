@@ -27,7 +27,7 @@ Reserve the machine's IP in your router — it is on Wi-Fi — so bookmarks keep
 
 ## Navigation
 
-The owner dashboard is three pages sharing one persistent shell — the rail (desktop, left) / tabbar (phone,
+The owner dashboard is several pages sharing one persistent shell — the rail (desktop, left) / tabbar (phone,
 bottom) never disappears, switching pages never reloads the browser tab:
 
 - **Home** — the card grid (Now, gigs, diary, projects, music, Launchpad, system…).
@@ -36,9 +36,12 @@ bottom) never disappears, switching pages never reloads the browser tab:
 - **Media** — an embedded Jellyfin (or whichever link is marked **Use as Media view** in Settings → Links),
   in an iframe that's created once and never reloaded — switching away and back keeps whatever was
   playing/browsing exactly where you left it.
+- **Companion** / **SQL DB** — Music Companion and its database explorer, embedded the same way.
+- **Music** — Spotify playlists built from your own listening, Discover, gig setlists, and full-page Releases and
+  Vinyl radar. See [The Music page](#the-music-page).
 
 Settings is still its own separate page (the gear icon) — everything else routes client-side via the URL hash
-(`#home` / `#news` / `#media`), so the back/forward buttons and reload both work normally.
+(`#home` / `#news` / `#media` / `#music` / `#sql` / `#listen`), so the back/forward buttons and reload both work normally.
 
 ## Who sees what
 
@@ -197,6 +200,41 @@ expanded view's *Dismissed* filter. The first look at an artist or store is a si
 
 A fresh install works through all followed artists in the background (several minutes, politely paced). The Ticketmaster
 key is write-only — the browser never sees it again.
+
+## The Music page
+
+Playlists Citadel designs from your own listening (Music Companion's database, read-only) and keeps on your Spotify
+account, plus a player bar that steers Spotify wherever it's playing — the desktop app on this PC, a phone, a speaker.
+
+- **Playlists** — each is a design: *ingredients* with a share each (your history, a time capsule, your records'
+  tracklists, deep cuts, picked artists, a genre, a gig setlist, new releases, Last.fm similar artists, MusicBrainz band
+  connections, a Last.fm tag) and *rules* (length, max per artist, familiar ↔ new, skip recent plays, no repeats, order).
+  **Fixed** playlists change only when rebuilt; **rotating** ones are rebuilt on schedule into the *same* Spotify
+  playlist (so its link and followers stay). Lock a track to keep it through rebuilds; remove one and that playlist
+  leaves it out for good. Songs Spotify can't match are listed with a **Find…** to pick by hand (remembered).
+- **Discover** — artists you've never (or barely) played, ranked by Last.fm similarity and MusicBrainz shared members,
+  weighted by how much you play the artists they connect to; **Follow** adds them to Releases / Vinyl radar / Gig
+  radar. **Rediscover** lists artists you've drifted from, with a one-click mix.
+- **Gigs** — a predicted setlist for each booked gig (from the band's last ten shows on Setlist.fm), a **pre-gig
+  playlist** that refreshes daily and switches to the real setlist after the show, playlists of shows you were at, and
+  any setlist.fm link → playlist (what Setlist → Spotify did).
+- **Releases / Vinyl** — Home's cards given the whole page, with **Listen** (plays the album, or before release day the
+  artist's best-known songs). Pins, dismissals and purchases are shared with Home.
+
+The player bar has three sizes (full, slim, hidden into a chip in the page header); on the fixed 1080p/1440p layout
+it has its own row and never covers anything.
+
+**Setting up** (Settings → **Music page**): your Spotify app's client ID/secret (developer.spotify.com — one app per
+account, Premium needed), with `http://127.0.0.1:8080/music/spotify/callback` added to its Redirect URIs; then
+**Connect**, finishing the login *in a browser on the Citadel PC* (Spotify only returns logins to 127.0.0.1). A login
+lasts six months whatever happens, so Citadel warns two weeks ahead. Last.fm and Setlist.fm keys go in the same tab.
+
+Spotify's 2026 rules for personal apps decided several things here: no recommendations / related artists / audio
+features / artist top tracks (Last.fm and MusicBrainz stand in), search returns at most 10 results (one song at a time,
+remembered), playlists are made with `POST /me/playlists` and filled via `/playlists/{id}/items`.
+
+**Adding a service**: one module in `app/music/services/` (a `Service` with its fields and a `test()`), usually plus an
+ingredient in `app/music/ingredients.py` that uses it. Settings lists it by itself.
 
 ## Widgets
 

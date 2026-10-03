@@ -212,3 +212,13 @@ select.input option { background: var(--surface-3); }
 @media (max-width: 600px) {
   .themepicks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 4px 14px 14px; }
 }
+
+/* Music page → services: one block per service */
+.svc-row { padding: 12px 0; border-top: 1px solid var(--edge); }
+.svc-row:first-child { border-top: 0; }
+.svc-row__head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.svc-row__head b { font-size: 15px; color: var(--silver-hi); }
+.svc-row__head .btn { margin-left: auto; }
+.svc-row .status-line { padding: 8px 0 0; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--edge-strong); border-top-color: var(--accent-hi); border-radius: 50%; animation: spin .9s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }

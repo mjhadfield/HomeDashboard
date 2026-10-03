@@ -5,6 +5,7 @@ import { newsDef, newsUi, vinylUi } from './content-cards.js';
 import { Shell } from './shell.js';
 import { $, $$, esc, hostUrl, ico, tickClock, tickUptimes, toast } from './util.js';
 import { BUILTIN, chosen, currentLook, currentTheme, specOf, syncThemes, useTheme } from './theme.js';
+import * as music from './music.js';
 
 let state = null;
 const shell = new Shell($('#grid'), cards, id => renderCard(id));
@@ -141,6 +142,7 @@ function renderAll() {
   setMediaSrc();
   setMusicSrc();
   setSqlSrc();
+  music.onState(state);
   $('#host-label').textContent = `${state.host} · ${location.hostname}`;
   $('#device-label').textContent = `${state.device.role === 'owner' ? 'Owner' : state.device.role} device`;
 }
@@ -156,14 +158,15 @@ async function pollMonitoring() {
   renderCard('monitoring');
 }
 
-// ---- view router (Home / News / Media / Companion / SQL DB / future sections) --------------------------------------------------
-const VIEWS = ['home', 'news', 'media', 'music', 'sql'];
+// ---- view router (Home / News / Media / Companion / SQL DB / Music) --------------------------------------------------------------
+const VIEWS = ['home', 'news', 'media', 'music', 'sql', 'listen'];
 function route() {
   const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home';
   $$('.view').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   $$('.rail a[data-view], .tabbar a[data-view]').forEach(a => {
     if (a.dataset.view === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  music.onView(v);                                  // the Music page (music.js) only polls Spotify while it's on screen
 }
 addEventListener('hashchange', route);
 route();

@@ -10,6 +10,7 @@
 <script src="/static/js/theme-init.js"></script>
 <link rel="stylesheet" href="/static/css/components.css">
 <link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/music.css">
 </head>
 <body>
 <div class="sweep"></div>
@@ -22,6 +23,7 @@
     <a href="#media" data-view="media" title="Media"><svg class="i"><use href="#i-film"/></svg><span class="rail__label">Media</span></a>
     <a href="#music" data-view="music" title="Companion"><svg class="i"><use href="#i-disc"/></svg><span class="rail__label">Companion</span></a>
     <a href="#sql" data-view="sql" title="SQL DB"><svg class="i"><use href="#i-server"/></svg><span class="rail__label">SQL DB</span></a>
+    <a href="#listen" data-view="listen" title="Music"><svg class="i"><use href="#i-wave"/></svg><span class="rail__label">Music</span></a>
     <span class="spacer"></span>
     <a href="/settings" class="rail__settings" title="Settings"><svg class="i"><use href="#i-gear"/></svg><span class="rail__label">Settings</span></a>
   </nav>
@@ -46,6 +48,7 @@
     <section class="view" id="view-sql" data-view="sql" aria-label="SQL DB">
       <div class="frame-shell"><iframe id="sql-frame" title="SQL DB" allow="autoplay; fullscreen" allowfullscreen></iframe></div>
     </section>
+    <section class="view" id="view-listen" data-view="listen" aria-label="Music"></section>
   </main>
 </div>
 
@@ -55,6 +58,7 @@
   <a href="#media" data-view="media"><svg class="i"><use href="#i-film"/></svg>Media</a>
   <a href="#music" data-view="music"><svg class="i"><use href="#i-disc"/></svg>Companion</a>
   <a href="#sql" data-view="sql"><svg class="i"><use href="#i-server"/></svg>SQL DB</a>
+  <a href="#listen" data-view="listen"><svg class="i"><use href="#i-wave"/></svg>Music</a>
 </nav>
 
 <script type="module" src="/static/js/icons.js"></script>

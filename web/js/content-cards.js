@@ -29,7 +29,7 @@ function dayAge(date, todayIso) {
 }
 
 // ---- row actions ------------------------------------------------------------------------------------------------
-function acts(it) {
+function acts(it, lead = '') {
   if (it.status === 'dismissed') {
     return `<div class="feed__acts feed__acts--wide"><button class="btn" data-item-act="restore" data-id="${it.id}" data-to="seen">Restore</button></div>`;
   }
@@ -37,7 +37,7 @@ function acts(it) {
   // Order: seen (only while it's new) · dismiss · mute · pin. The pin sits furthest right and, once pinned, stays lit
   // even when the row isn't hovered.
   const seen = it.status === 'new' ? `<button class="btn btn--icon" data-item-act="seen" data-id="${it.id}" data-to="seen" aria-label="Mark as seen" title="Mark as seen — clears the New highlight">${ico('check')}</button>` : '';
-  return `<div class="feed__acts">${seen}
+  return `<div class="feed__acts">${lead}${seen}
     <button class="btn btn--icon" data-item-act="dismiss" data-id="${it.id}" data-to="dismissed" aria-label="Dismiss" title="Dismiss">${ico('x')}</button>
     ${it.artist ? `<button class="btn btn--icon" data-item-act="mute" data-artist="${esc(it.artist)}" aria-label="Mute ${esc(it.artist)}" title="Mute ${esc(it.artist)}">${ico('mute')}</button>` : ''}
     <button class="btn btn--icon${pinned ? ' is-pinned' : ''}" data-item-act="pin" data-id="${it.id}" data-to="${pinned ? 'seen' : 'pinned'}" aria-label="${pinned ? 'Unpin' : 'Pin'}" aria-pressed="${pinned}" title="${pinned ? 'Unpin' : 'Pin to top'}">${ico('pin')}</button></div>`;
@@ -47,13 +47,14 @@ const link = (it, text, attrs = '') => `<a class="feed__link" href="${esc(safeUr
 /** "Artist — Title", or just the title for anything without one — used in confirmation prompts, so the dialog names the actual record. */
 const rowName = it => esc(it.artist ? `${it.artist} — ${it.title}` : it.title);
 
-function musicRow(it, k, hide) {
+function musicRow(it, k, hide) { return musicRowWith(it, k, hide, ''); }
+export function musicRowWith(it, k, hide, lead) {
   const more = hide;
   const art = thumb(it.meta?.image);
   return `<li class="feed${it.status === 'new' ? ' feed--new' : ''}${it.status === 'pinned' ? ' feed--pinned' : ''}${more ? ' more' : ''}"${more ? ' hidden' : ''}>
     <span class="cover cover--art ${COVERS[k % 4]}">${esc(initial(it.artist || it.title))}${art ? `<img class="cover__img" src="${esc(art)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>
     <div class="feed__main"><div class="feed__title">${link(it, `${it.artist ? `${it.artist} — ` : ''}${it.title}`)}</div><div class="feed__sub">${esc(it.subtitle)}</div></div>
-    <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}<div class="feed__date">${esc(niceDate(it.date))}</div>${acts(it)}</div></li>`;
+    <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}<div class="feed__date">${esc(niceDate(it.date))}</div>${acts(it, lead)}</div></li>`;
 }
 
 // Artwork only ever comes from the image hosts the page's CSP allows; Shopify's CDN can resize, so ask for a thumbnail.
@@ -70,7 +71,8 @@ document.addEventListener('error', e => { if (e.target instanceof HTMLImageEleme
 
 /** Vinyl tile: artist and album each get their own (wrapping) line so long names are never cut short; the facts sit beneath and the
  *  date is small, right-aligned and DD/MM/YYYY. The expanded view also lists every edition with its price. */
-function vinylRow(it, k, hide) {
+function vinylRow(it, k, hide) { return vinylRowWith(it, k, hide, ''); }
+export function vinylRowWith(it, k, hide, lead) {
   const m = it.meta || {};
   const art = thumb(m.image);
   const [when, day] = it.date ? ['releases', fmtDMY(it.date)] : m.listed ? ['listed', fmtDMY(m.listed)] : ['date', 'TBC'];
@@ -89,19 +91,19 @@ function vinylRow(it, k, hide) {
       <div class="vin__album" title="${esc(it.title)}">${link(it, it.title)}</div>
       <div class="vin__facts">${facts}</div>${eds}</div>
     <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}
-      <div class="vin__when"><small>${when}</small>${esc(day)}</div>${vinylActs(it)}</div></li>`;
+      <div class="vin__when"><small>${when}</small>${esc(day)}</div>${vinylActs(it, lead)}</div></li>`;
 }
 
 // Vinyl-only row actions: no per-row artist-mute (Settings → Music's artist list still has one), a Purchased
 // tick instead — moves it to Confirmed Pre-orders (see vinylUi/preorderList below). A copy of the shared acts(),
 // not a shared-function change, since no other card needs this swap.
-function vinylActs(it) {
+function vinylActs(it, lead = '') {
   if (it.status === 'dismissed') {
     return `<div class="feed__acts feed__acts--wide"><button class="btn" data-item-act="restore" data-id="${it.id}" data-to="seen">Restore</button></div>`;
   }
   const pinned = it.status === 'pinned';
   const seen = it.status === 'new' ? `<button class="btn btn--icon" data-item-act="seen" data-id="${it.id}" data-to="seen" aria-label="Mark as seen" title="Mark as seen — clears the New highlight">${ico('check')}</button>` : '';
-  return `<div class="feed__acts">${seen}
+  return `<div class="feed__acts">${lead}${seen}
     <button class="btn btn--icon" data-item-act="dismiss" data-id="${it.id}" data-to="dismissed" aria-label="Dismiss" title="Dismiss">${ico('x')}</button>
     <button class="btn btn--icon" data-item-act="purchased" data-id="${it.id}" data-to="purchased" data-title="${rowName(it)}"${it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? ` data-release-date="${esc(it.date)}"` : ''} aria-label="Mark purchased" title="Mark purchased — moves it to Confirmed Pre-orders">${ico('check')}</button>
     <button class="btn btn--icon${pinned ? ' is-pinned' : ''}" data-item-act="pin" data-id="${it.id}" data-to="${pinned ? 'seen' : 'pinned'}" aria-label="${pinned ? 'Unpin' : 'Pin'}" aria-pressed="${pinned}" title="${pinned ? 'Unpin' : 'Pin to top'}">${ico('pin')}</button></div>`;
@@ -131,7 +133,7 @@ function newsRow(it, k, hide, todayIso) {
 }
 
 // ---- filtering (expanded view) --------------------------------------------------------------------------------------
-function narrow(data, ctx, todayIso, extra = {}) {
+export function narrow(data, ctx, todayIso, extra = {}) {
   let list = data.items;
   const f = ctx.filter;
   if (f === 'new') list = list.filter(i => i.status === 'new');
@@ -186,7 +188,8 @@ function vinylHeader() {
 // acknowledged yet — so day 0 and every day after both read as one open-ended "still waiting" state.
 const daysBadge = n => n == null ? '<span class="chip">TBC</span>' : n <= 0 ? '<span class="chip chip--fresh">Any moment!</span>' : `<span class="chip chip--fresh">${esc(relDays(n))}</span>`;
 
-function preorderRow(it) {
+function preorderRow(it) { return preorderRowWith(it, ''); }
+export function preorderRowWith(it, lead) {
   const m = it.meta || {};
   const art = cover(m.image);
   // A store link survives onto a purchased row two ways: it's already the keeper row's own url when bought
@@ -203,7 +206,7 @@ function preorderRow(it) {
     <div class="feed__meta">
       <div class="preorder__row">${daysBadge(it.in_days)}
         <input type="date" class="preorder-date" data-preorder-date="${it.id}" value="${it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : ''}" aria-label="Release date — leave blank if TBC"></div>
-      <div class="preorder__row">
+      <div class="preorder__row">${lead}
         <button class="btn" data-item-act="received" data-id="${it.id}" data-title="${name}">Received</button>
         <button class="btn" data-item-act="remove" data-id="${it.id}" data-title="${name}">Remove</button></div></div></li>`;
 }

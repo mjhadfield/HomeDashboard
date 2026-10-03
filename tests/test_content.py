@@ -823,7 +823,8 @@ def test_the_recheck_migration_sends_every_artist_back_through_the_new_releases_
 def test_artwork_hosts_are_the_only_images_the_csp_lets_through(client):
     csp = client.get("/guest").headers["content-security-policy"]
     img = next(part for part in csp.split(";") if part.strip().startswith("img-src"))
-    assert set(img.split()[1:]) == {"'self'", "data:", "https://cdn.shopify.com", "https://imagescdn.juno.co.uk", "https://static.wixstatic.com", "https://coverartarchive.org", "https://archive.org", "https://*.archive.org"}
+    assert set(img.split()[1:]) == {"'self'", "data:", "https://cdn.shopify.com", "https://imagescdn.juno.co.uk", "https://static.wixstatic.com", "https://coverartarchive.org", "https://archive.org", "https://*.archive.org",
+                                     "https://i.scdn.co"}                                         # Spotify artwork, for the Music page's player bar
     assert "script-src 'self'" in [part.strip() for part in csp.split(";")]                    # scripts are still first-party only
 
 

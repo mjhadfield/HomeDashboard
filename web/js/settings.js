@@ -4,7 +4,7 @@ import * as api from './api.js';
 import { $, $$, esc, ico, hhmm, ago, toast, isoOf } from './util.js';
 import { BUILTIN, chosen, specOf, useTheme, applySpec } from './theme.js';
 
-const TABS = [['links', 'Links', 'globe'], ['projects', 'Projects', 'grid'], ['widgets', 'Widgets', 'cal'], ['appearance', 'Appearance', 'sun'], ['music', 'Music', 'disc'], ['news', 'News', 'news'], ['screens', 'Screens & devices', 'server'], ['maintenance', 'Maintenance & logs', 'gear'], ['about', 'About', 'chip']];
+const TABS = [['links', 'Links', 'globe'], ['projects', 'Projects', 'grid'], ['widgets', 'Widgets', 'cal'], ['appearance', 'Appearance', 'sun'], ['music', 'Music', 'disc'], ['listen', 'Music page', 'wave'], ['news', 'News', 'news'], ['screens', 'Screens & devices', 'server'], ['maintenance', 'Maintenance & logs', 'gear'], ['about', 'About', 'chip']];
 const panel = $('#panel');
 let cfg = null, live = null, extras = { artists: { artists: [], music_db: false }, gigs: [] };   // config, live widget status, artists + gigs
 let maint = { jobs: [], log_counts: {}, backups: [], now: 0 }, logs = { items: [], sources: [], counts: {} };   // schedule table + event log
@@ -12,6 +12,8 @@ const logf = { level: 'warning', source: '', q: '' };                           
 let tab = TABS.some(t => t[0] === location.hash.slice(1)) ? location.hash.slice(1) : 'links';
 let editing = null;                     // {kind:'link'|'project', id} | {kind, id:'new'}
 let enrol = null;                       // last generated enrolment link
+let musicCfg = null, musicLink = null;   // the Music page's settings (GET /api/owner/music) and the last Spotify login link
+const svcTests = {};                    // service id -> {ok, message} from its Test button
 
 // A dashboard card can link straight to "add one of these" (e.g. Next gig's small + button) with ?add=<kind>,
 // instead of only landing on the tab and leaving the person to find the button themselves.
@@ -314,6 +316,57 @@ function newsSettingsCard() {
       </div><div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="news"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
+// ---- Music page: Spotify, the outside services, playlist defaults ----------------------------------------------------------
+const svcResult = id => svcTests[id] ? `<div class="status-line${svcTests[id].ok ? '' : ' status-line--err'}"><span class="dot ${svcTests[id].ok ? 'dot--ok' : 'dot--bad'}"></span>${esc(svcTests[id].message)}</div>` : '';
+const svcField = (svc, f) => field(f.label, input(`svc_${f.name}`, f.secret ? '' : svc.values[f.name],
+  f.secret ? `type="password" autocomplete="off" spellcheck="false" placeholder="${svc.has[f.name] ? '•••• saved — leave blank to keep' : esc(f.placeholder || 'paste it here')}"` : `placeholder="${esc(f.placeholder)}" spellcheck="false"`));
+
+function spotifyCard() {
+  const sp = musicCfg.spotify, svc = musicCfg.services.find(x => x.id === 'spotify');
+  const until = sp.login_until ? new Date(sp.login_until * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  const status = !svc.configured ? '<div class="status-line"><span class="dot"></span>Add your Spotify app’s client ID and secret, then Connect.</div>'
+    : sp.expired ? '<div class="status-line status-line--err"><span class="dot dot--bad"></span>The login has run out (they last six months) — Connect again.</div>'
+    : sp.connected ? `<div class="status-line${sp.days_left <= 14 ? ' status-line--err' : ''}"><span class="dot ${sp.days_left <= 14 ? 'dot--warn' : 'dot--ok'}"></span>Connected${sp.user ? ` as ${esc(sp.user)}` : ''} — login good until ${esc(until)} (${sp.days_left} days)</div>`
+    : '<div class="status-line"><span class="dot dot--warn"></span>Not connected yet.</div>';
+  const link = musicLink ? `<div class="form-grid" style="margin-top:12px">${field('Open this in a browser on the Citadel PC', `<input class="input" readonly data-select-all value="${esc(musicLink)}">`,
+    'Spotify only sends logins back to 127.0.0.1, so it has to finish on this PC. Afterwards every device can use the Music page.', 'wide')}</div>
+    <div class="form-actions"><a class="btn btn--go" href="${esc(musicLink)}" target="_blank" rel="noopener">Open the login page</a></div>` : '';
+  return card('Spotify', `Uses your own Spotify app (<a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer dashboard</a>; Premium needed). Add this <b>Redirect URI</b> to the app’s settings:`,
+    `<div style="padding:0 18px 10px"><input class="input" readonly data-select-all value="${esc(sp.redirect_uri)}" aria-label="Redirect URI"></div>${status}${svcResult('spotify')}
+    <form class="form" data-form="music-spotify" style="padding:0 18px 12px"><div class="form-grid">${svc.fields.map(f => svcField(svc, f)).join('')}</div>
+      <div class="checks">${check('svc_enabled', 'Use Spotify', svc.enabled)}</div>
+      <div class="form-actions">${sp.connected ? act('svc-test', 'Test', 'data-id="spotify"') + act('spotify-logout', 'Disconnect', '', 'btn--danger') : ''}
+        ${svc.configured ? act('spotify-login', sp.connected ? 'Reconnect' : 'Connect', '', 'btn--go') : ''}<button class="btn btn--solid" type="submit">Save</button></div>${link}</form>`);
+}
+
+function playlistDefaultsCard() {
+  const s = musicCfg.settings;
+  return card('Playlists', '', `<form class="form" data-form="music-defaults" style="padding:0 18px 12px"><div class="form-grid">
+      ${field('Name prefix on Spotify', input('prefix', s.prefix, 'maxlength="24"'), 'Every playlist Citadel makes is named with this in front.')}
+      ${field('Rotating playlists refresh at', input('rotate_at', s.rotate_at, 'type="time"'))}
+      ${field('Start the Spotify desktop app with', input('desktop_command', s.desktop_command, 'spellcheck="false"'), 'Used by Open Spotify on the Music page.', 'wide')}
+    </div><div class="checks">${check('public', 'New playlists are public', s.public)}</div>
+    <div class="form-actions"><button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
+function servicesCard() {
+  const rows = musicCfg.services.filter(x => x.id !== 'spotify').map(svc => `<div class="svc-row" data-svc="${esc(svc.id)}">
+      <div class="svc-row__head"><b>${esc(svc.name)}</b>${svc.always_on ? '' : check('svc_enabled', 'On', svc.enabled)}${svc.link ? `<a class="feed__link" href="${esc(svc.link)}" target="_blank" rel="noopener">${svc.fields.length ? 'get a key' : 'site'}</a>` : ''}
+        <span class="dim">${!svc.configured ? (svc.id === 'companion' ? '· database not found' : '· needs setting up') : ''}</span>${act('svc-test', 'Test', `data-id="${esc(svc.id)}"`)}</div>
+      <p class="field__h" style="margin:4px 0 8px">${esc(svc.blurb)}${svc.path ? ` <code>${esc(svc.path)}</code>` : ''}</p>
+      ${svc.fields.length ? `<div class="form-grid">${svc.fields.map(f => svcField(svc, f)).join('')}</div>` : ''}${svcResult(svc.id)}</div>`).join('');
+  return card('Music services', 'Where the Music page gets what Spotify doesn’t give personal apps any more. Adding a service later is one file in <code>app/music/services/</code>.',
+    `<form class="form" data-form="music-services" style="padding:0 18px 12px">${rows}<div class="form-actions"><button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
+function musicHousekeepingCard() {
+  return card('Housekeeping', '', `<div class="bar-actions">${act('music-discover', 'Refresh Discover now')}${act('music-forget', 'Forget Spotify matches', '', 'btn--danger')}</div>
+    <p class="sx__intro">Songs are matched on Spotify once and remembered; forgetting makes them all look again (picks you made by hand are kept).</p>`);
+}
+
+const musicPageTab = () => musicCfg ? spotifyCard() + playlistDefaultsCard() + servicesCard() + musicHousekeepingCard()
+  : card('Music page', '<span class="spin"></span>', '');
+
 // ---- Screens & devices ------------------------------------------------------------------------------------------
 const PANEL_LABELS = { bins: ['Bins', ''], gigs: ['Next gig', ''], diary: ['Diary', 'Anyone who can see the TV will see your events.'] };
 
@@ -372,7 +425,7 @@ function jobStatusHtml(j) {
   const last = j.last_run ? `${whenLabel(j.last_run)}${j.seconds != null ? ` · ${dur(j.seconds)}` : ''}` : 'never';
   const fail = j.streak ? ` <span class="chip chip--warn">${j.streak} failed${j.streak === 1 ? '' : ' in a row'}</span>` : '';
   return `<span class="dot ${dot}" title="${esc(label)}"></span><div><span class="sched__state">${esc(label)}</span>${fail}
-    <div class="item__sub sched__msg" title="${esc(j.message)}">${esc(j.message || (j.status === 'not set up' ? 'Add its key or address on its settings page' : ''))}</div>
+    <div class="item__sub sched__msg" title="${esc(j.message)}">${esc(j.message || (j.status === 'not set up' ? (j.hint || 'Add its key or address on its settings page') : ''))}</div>
     <div class="item__sub">last ${esc(last)} · next ${esc(next)}</div></div>`;
 }
 
@@ -526,10 +579,11 @@ function aboutTab() {
 function render() {
   if (editing?.kind !== 'theme') useTheme(chosen(), cfg.appearance.themes);     // ends any live preview; picks up edits made elsewhere
   $('#tabs').innerHTML = TABS.map(([id, label, icon]) => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}"${id === 'maintenance' && needsAttention() ? ' class="has-attn"' : ''}>${ico(icon)}${esc(label)}</button>`).join('');
-  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
+  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), listen: musicPageTab, news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
 }
 
 async function load() {
+  musicCfg = await api.get('/api/owner/music').catch(() => null);
   [cfg, live, extras.artists, extras.gigs] = await Promise.all([api.get('/api/owner/config'), api.get('/api/owner/state').then(s => s.widgets), api.get('/api/owner/artists'), api.get('/api/owner/gigs').then(r => r.gigs), loadMaint()]).then(r => r.slice(0, 4));
   render();
 }
@@ -625,6 +679,13 @@ panel.addEventListener('click', e => {
     case 'delete-gig': if (confirm(`Delete the ${d.name} gig?`)) run(() => api.del(`/api/owner/gigs/${d.id}`), 'Gig deleted'); break;
     case 'remove-artist': if (confirm(`Stop following ${d.name}? Their found items will disappear.`)) run(() => api.del(`/api/owner/artists/${d.id}`), 'Removed'); break;
     case 'resync': run(async () => { const r = await api.post('/api/owner/artists/resync'); toast(`Music Companion: ${r.added} new artist${r.added === 1 ? '' : 's'} followed, ${r.updated} refreshed`); }); break;
+    case 'spotify-login': run(async () => { const r = await api.post('/api/owner/music/spotify/login'); musicLink = r.url;
+      if (['127.0.0.1', 'localhost'].includes(location.hostname)) window.open(r.url, '_blank', 'noopener'); }, ['127.0.0.1', 'localhost'].includes(location.hostname) ? 'Opened Spotify’s login page' : 'Open the link below on the Citadel PC'); break;
+    case 'spotify-logout': if (confirm('Disconnect Spotify? Playlists stay on your account; Citadel just stops updating them.')) run(async () => { await api.post('/api/owner/music/spotify/logout'); musicLink = null; }, 'Disconnected'); break;
+    case 'svc-test': b.disabled = true; b.textContent = 'Testing…';
+      api.post(`/api/owner/music/services/${d.id}/test`).then(r => { svcTests[d.id] = r; render(); }).catch(err => toast(err.message)); break;
+    case 'music-forget': if (confirm('Forget every Spotify match? They’ll be looked up again as playlists are built.')) run(async () => { const r = await api.del('/api/owner/music/matches'); toast(`Forgot ${r.forgotten} matches`); }); break;
+    case 'music-discover': run(() => api.post('/api/owner/music/discover/refresh'), 'Discover is being worked out — a minute or two'); break;
     case 'add-shop': $('#shops').insertAdjacentHTML('beforeend', shopRow()); $('#shops [data-shop]:last-child input')?.focus(); break;
     case 'remove-shop': b.closest('[data-shop]').remove(); break;
     case 'check-shop': {
@@ -762,6 +823,21 @@ panel.addEventListener('submit', e => {
     const every = val(f, 'mode') === 'every';
     const body = every ? { mode: 'every', seconds: Math.round(Number(val(f, 'amount')) * Number(val(f, 'unit'))) } : { mode: 'daily', at: val(f, 'at') };
     run(() => api.put(`/api/owner/maintenance/${f.dataset.id}/schedule`, body), 'Schedule saved');
+  } else if (kind === 'music-spotify') {
+    const svc = { enabled: on(f, 'svc_enabled') };
+    musicCfg.services.find(x => x.id === 'spotify').fields.forEach(x => { svc[x.name] = val(f, `svc_${x.name}`); });
+    run(() => api.put('/api/owner/music/settings', { services: { spotify: svc } }), 'Spotify settings saved');
+  } else if (kind === 'music-defaults') {
+    run(() => api.put('/api/owner/music/settings', { prefix: f.elements.prefix.value, public: on(f, 'public'), rotate_at: val(f, 'rotate_at'), desktop_command: val(f, 'desktop_command') }), 'Saved');
+  } else if (kind === 'music-services') {
+    const services = {};
+    $$('[data-svc]', f).forEach(row => {
+      const svc = musicCfg.services.find(x => x.id === row.dataset.svc), out = {};
+      if (!svc.always_on) out.enabled = !!row.querySelector('[name=svc_enabled]')?.checked;
+      svc.fields.forEach(x => { out[x.name] = row.querySelector(`[name=svc_${x.name}]`).value.trim(); });
+      services[svc.id] = out;
+    });
+    run(() => api.put('/api/owner/music/settings', { services }), 'Saved');
   } else if (kind === 'pair') {
     run(async () => { await api.post('/api/owner/pair', { code: val(f, 'code'), name: val(f, 'name') || 'TV' }); }, 'Screen paired');
   }

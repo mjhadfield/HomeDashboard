@@ -203,6 +203,7 @@ def overview(scheduler: Scheduler) -> dict[str, Any]:
             "last_run": st and st.get("last_run"), "last_ok": st and st.get("last_ok"), "seconds": st and st.get("last_seconds"),
             "streak": (st or {}).get("streak", 0), "failing_since": st and st.get("failing_since"), "message": (st or {}).get("message", ""),
             "next_run": max(due, scheduler._not_before.get(w.id, 0.0)) if configured else None,
+            "hint": w.setup_hint,
         })
     return {"now": now, "jobs": rows, "log_counts": logbook.counts(), "backups": sorted(p.name for p in _backup_dir().glob("hub-*.sqlite"))}
 

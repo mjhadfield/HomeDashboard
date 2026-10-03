@@ -24,6 +24,7 @@ class Widget:
     timeout: int = 45            # a fetch running longer than this is abandoned
     defaults: dict[str, Any] = {}
     secret_keys: tuple[str, ...] = ()   # setting keys that must never be sent back to the browser
+    setup_hint: str = ""                 # where to set it up, for Settings → Maintenance while it's "not set up"
 
     def configured(self, settings: dict[str, Any]) -> bool:
         """False -> the scheduler skips fetching and the card shows a 'not set up' state."""

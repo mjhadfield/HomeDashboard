@@ -10,8 +10,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import api_content, api_maintenance, api_owner, api_screens, auth, config, content, coverart, db, logbook, maintenance, monitor, musicbrainz, notify, procs, seed, state
+from . import api_content, api_maintenance, api_music, api_owner, api_screens, auth, config, content, coverart, db, logbook, maintenance, monitor, musicbrainz, notify, procs, seed, state
 from .health import Health
+from .music import store as music_store
+from .music.rotator import Rotator
+from .music.services.spotify import client as spotify_client
 from .bus import bus
 from .scheduler import Scheduler
 from .widgets import discover
@@ -29,11 +32,11 @@ for _noisy in ("httpx", "httpcore"):
 # workable allowlist here, even though every image is only ever *linked* from coverartarchive.org itself.
 # frame-src is Jellyfin (Media page), Music Companion (Companion page) and the Music DB Explorer (SQL DB page) —
 # fixed addresses, hardcoded here the same way the image hosts above are; if any changes in Settings, this needs
-# a matching edit. :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
+# a matching edit. i.scdn.co is Spotify's artwork CDN (the Music page's player bar). :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
 # own pages ever creates an iframe pointed at it directly -- Companion's own settings-icon link navigates the
 # *existing* #music-frame iframe to it, and frame-src also governs subsequent navigations of a nested browsing
 # context, not just its initial src.
-CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org; "
+CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
@@ -78,12 +81,16 @@ async def lifespan(app: FastAPI):
     widgets = discover()
     health = Health(bus)
     # Data syncs and housekeeping share one scheduler. Events carry only an id; clients re-fetch their own filtered state.
-    scheduler = Scheduler({**widgets, **maintenance.jobs()}, lambda wid: notify.widget(wid) if wid in widgets else None)
+    from .music.scrobble_job import job as scrobbles   # Music Companion's scheduled Last.fm import (no dashboard card)
+    scheduler = Scheduler({**widgets, **maintenance.jobs(), scrobbles.id: scrobbles}, lambda wid: notify.widget(wid) if wid in widgets else None)
     mon = monitor.Monitor()
-    app.state.health, app.state.scheduler, app.state.monitor = health, scheduler, mon
+    rotator = Rotator()                              # rotating playlists on the Music page (app/music/rotator.py)
+    app.state.health, app.state.scheduler, app.state.monitor, app.state.rotator = health, scheduler, mon, rotator
+    music_store.learn_secrets()
     await health.start()
     await scheduler.start()
     await mon.start()
+    await rotator.start()
     watcher = asyncio.create_task(_watch_units(app), name="unit-watcher")
 
     if auth.needs_bootstrap():
@@ -96,11 +103,13 @@ async def lifespan(app: FastAPI):
     finally:
         watcher.cancel()
         await asyncio.gather(watcher, return_exceptions=True)
+        await rotator.stop()
         await mon.stop()
         await scheduler.stop()
         await health.stop()
         await musicbrainz.client.close()
         await coverart.client.close()
+        await spotify_client.close()
 
 
 app = FastAPI(title="Citadel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -224,5 +233,7 @@ async def guest_api(request: Request):
 app.include_router(api_owner.router)
 app.include_router(api_maintenance.router)
 app.include_router(api_content.router)
+app.include_router(api_music.router)
+app.include_router(api_music.public)
 app.include_router(api_screens.public)
 app.include_router(api_screens.kiosk)
