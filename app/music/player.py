@@ -132,6 +132,17 @@ async def play_uris(uris: list[str], *, context: str | None = None) -> None:
     _forget()
 
 
+async def queue_uris(uris: list[str]) -> None:
+    """Add tracks to the end of the queue, in order (Spotify takes them one at a time). Needs something playing or a
+    device that's open."""
+    if not uris:
+        raise ServiceError("Couldn’t find that on Spotify")
+    device = _dev(await _target())
+    for uri in uris[:50]:
+        await sp.client.api("POST", "/me/player/queue", params={"uri": uri, **(device or {})})
+    _forget()
+
+
 async def open_desktop() -> dict[str, Any]:
     """Start the Spotify desktop app here (if it isn't already) and wait for it to appear as a device."""
     argv = store.settings()["desktop_argv"]

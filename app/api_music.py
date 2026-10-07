@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import auth
-from .music import discover, gigs, ingredients, library, matcher, player, playlists, store
+from . import auth, db
+from .music import buying, discover, gigs, ingredients, library, matcher, player, playlists, store
 from .music.services import all_services, setlistfm
 from .music.services import spotify as sp
 from .music.services.base import ServiceError
@@ -78,7 +78,7 @@ class SettingsIn(BaseModel):
 
 
 @router.put("/settings")
-async def put_settings(body: SettingsIn):
+async def put_settings(body: SettingsIn, request: Request):
     s = store.settings()
     if body.prefix is not None:
         if not store.PREFIX_RE.match(body.prefix):
@@ -106,9 +106,12 @@ async def put_settings(body: SettingsIn):
             s["services"][sid] = svcs[sid].merge(s["services"].get(sid, {}), values)
         except ValueError as e:
             raise HTTPException(422, str(e))
+    before_discogs = store.settings()["services"].get("discogs", {})
     store.put_settings(s)
     store.learn_secrets()
     store.changed("settings")
+    if s["services"].get("discogs", {}) != before_discogs and buying.job.configured({}):
+        request.app.state.scheduler.refresh(buying.job.id)      # a new token or limit: check prices now, not in five hours
     return {"ok": True}
 
 
@@ -192,6 +195,23 @@ class PlayIn(BaseModel):
     uris: list[str] = []
 
 
+async def _top_uris(artist: str, n: int = 10) -> list[str]:
+    """An artist's top songs on Spotify, in order: Last.fm's most played (Spotify no longer shares its own top tracks),
+    else Spotify's search."""
+    titles = await discover.artist_tracks(artist, n)
+    found = await matcher.match([{"key": library.key(artist, t), "title": t, "artist": artist} for t in titles])
+    uris = [found[library.key(artist, t)] for t in titles if found.get(library.key(artist, t))]
+    if not uris:
+        items = await sp.client.search(f'artist:"{artist}"', "track", 10)
+        uris = [i["uri"] for i in items if library.anorm(artist) in {library.anorm(a["name"]) for a in i.get("artists", [])}]
+    return uris
+
+
+async def _album_hit(artist: str, title: str) -> dict[str, Any] | None:
+    albums = await sp.client.search(f'album:"{title}" artist:"{artist}"', "album", 5)
+    return next((a for a in albums if library.anorm(artist) in {library.anorm(x["name"]) for x in a.get("artists", [])}), None)
+
+
 async def _play(body: PlayIn) -> dict[str, Any]:
     if body.kind == "playlist":
         pl = playlists.get(body.playlist_id or 0)
@@ -205,21 +225,14 @@ async def _play(body: PlayIn) -> dict[str, Any]:
         await player.play_uris([u for u in body.uris if u.startswith("spotify:track:")])
         return {"what": ""}                                         # the page names what it asked for
     if body.kind == "album":
-        albums = await sp.client.search(f'album:"{body.title}" artist:"{body.artist}"', "album", 5)
-        hit = next((a for a in albums if library.anorm(body.artist) in {library.anorm(x["name"]) for x in a.get("artists", [])}), None)
+        hit = await _album_hit(body.artist, body.title)
         if hit:
             await player.play_uris([], context=hit["uri"])
             return {"what": hit["name"]}
         body.kind = "artist"                                       # not out yet (or not on Spotify): their best-known songs instead
     if body.kind == "artist":
-        titles = await discover.artist_tracks(body.artist, 8)
-        found = await matcher.match([{"key": library.key(body.artist, t), "title": t, "artist": body.artist} for t in titles])
-        uris = [u for u in found.values() if u]
-        if not uris:
-            items = await sp.client.search(f'artist:"{body.artist}"', "track", 10)
-            uris = [i["uri"] for i in items if library.anorm(body.artist) in {library.anorm(a["name"]) for a in i.get("artists", [])}]
-        await player.play_uris(uris)
-        return {"what": f"{body.artist} — their best-known songs"}
+        await player.play_uris(await _top_uris(body.artist))
+        return {"what": f"{body.artist} — their top 10"}
     hit = await matcher.search_track(body.artist, body.title)
     if not hit:
         raise ServiceError(f"Couldn’t find “{body.title}” by {body.artist} on Spotify")
@@ -230,6 +243,28 @@ async def _play(body: PlayIn) -> dict[str, Any]:
 @router.post("/play")
 async def play(body: PlayIn):
     return await _guard(_play(body))
+
+
+async def _queue(body: PlayIn) -> dict[str, Any]:
+    """Add to the end of what's playing (the desktop client's "Add to queue"): an artist's top 10, or a whole album."""
+    if body.kind == "album":
+        hit = await _album_hit(body.artist, body.title)
+        if not hit:
+            raise ServiceError(f"Couldn’t find {body.title} by {body.artist} on Spotify")
+        uris, what = [t["uri"] for t in await sp.client.album_tracks(hit["id"]) if t.get("uri")], hit["name"]
+    elif body.kind == "artist":
+        uris, what = await _top_uris(body.artist), f"{body.artist}’s top 10"
+    else:
+        raise HTTPException(422, "queue an artist's top 10 or an album")
+    if not uris:
+        raise ServiceError("Couldn’t find that on Spotify")
+    await player.queue_uris(uris)
+    return {"what": what, "queued": len(uris)}
+
+
+@router.post("/queue")
+async def queue(body: PlayIn):
+    return await _guard(_queue(body))
 
 
 @router.post("/player-open")
@@ -341,6 +376,37 @@ async def match_track(pid: int, body: MatchIn):
 @router.get("/candidates")
 async def candidates(artist: str, title: str):
     return {"items": await _guard(matcher.candidates(artist, title))}
+
+
+# ---- worth buying (Discogs) ----------------------------------------------------------------------------------------------
+
+@router.get("/buying")
+async def get_buying(request: Request):
+    """The last priced run, with your current limit applied (app/music/buying.py)."""
+    c = db.cache_get(buying.job.id)
+    error = (c["error"] or "").removeprefix("RuntimeError: ") or None
+    return {**buying.view(c["data"]), "error": error, "error_at": c["error_at"],
+            "running": buying.job.id in request.app.state.scheduler.running}
+
+
+@router.post("/buying/refresh", status_code=202)
+async def refresh_buying(request: Request):
+    """Check prices now (queued behind a run already going)."""
+    if not buying.job.configured({}):
+        raise HTTPException(422, "Discogs isn't set up — add a personal access token in Settings → Music page")
+    request.app.state.scheduler.refresh(buying.job.id)
+    return {"ok": True}
+
+
+class DismissIn(BaseModel):
+    undo: bool = False
+
+
+@router.post("/buying/{album_id}/dismiss")
+async def dismiss_buying(album_id: int, body: DismissIn):
+    buying.dismiss(album_id, body.undo)
+    store.changed("buying")
+    return {"ok": True}
 
 
 # ---- discover -------------------------------------------------------------------------------------------------------------

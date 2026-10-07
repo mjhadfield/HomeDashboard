@@ -82,7 +82,15 @@ async def lifespan(app: FastAPI):
     health = Health(bus)
     # Data syncs and housekeeping share one scheduler. Events carry only an id; clients re-fetch their own filtered state.
     from .music.scrobble_job import job as scrobbles   # Music Companion's scheduled Last.fm import (no dashboard card)
-    scheduler = Scheduler({**widgets, **maintenance.jobs(), scrobbles.id: scrobbles}, lambda wid: notify.widget(wid) if wid in widgets else None)
+    from .music.buying import job as buying            # the Music page's "Worth buying" prices from Discogs (no dashboard card)
+
+    def on_update(wid: str) -> None:
+        if wid in widgets:
+            notify.widget(wid)
+        elif wid == buying.id:
+            music_store.changed("buying")              # the Music page re-reads its prices
+
+    scheduler = Scheduler({**widgets, **maintenance.jobs(), scrobbles.id: scrobbles, buying.id: buying}, on_update)
     mon = monitor.Monitor()
     rotator = Rotator()                              # rotating playlists on the Music page (app/music/rotator.py)
     app.state.health, app.state.scheduler, app.state.monitor, app.state.rotator = health, scheduler, mon, rotator

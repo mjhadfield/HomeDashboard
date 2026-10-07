@@ -14,7 +14,7 @@ import pytest
 from app import config, db, logbook
 from app.music import gigs, ingredients, library, matcher, playlists, player, store
 from app.music.rotator import Rotator
-from app.music.services import setlistfm
+from app.music.services import lastfm, setlistfm
 from app.music.services import spotify as sp
 from app.music.services.base import ServiceError
 
@@ -409,12 +409,21 @@ async def test_discover_shows_only_artists_spotify_can_play_and_last_fm_leads(li
     monkeypatch.setattr(sp.client, "search", search)
     monkeypatch.setattr(lastfm, "similar", sim)
     monkeypatch.setattr(lastfm, "top_tracks", top)
+    async def tags(artist, n=4):
+        return {"Dark Tranquillity": ["melodic death metal", "swedish"]}.get(artist, [])
+    async def album(artist):
+        return {"Dark Tranquillity": "Damage Done"}.get(artist)
+    monkeypatch.setattr(lastfm, "top_tags", tags)
+    monkeypatch.setattr(lastfm, "top_album", album)
     monkeypatch.setattr(mbs, "artist_rels", rels)
     store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
     r = await discover.build("12m")
     names = [a["artist"] for a in r["artists"]]
     assert names == ["Dark Tranquillity", "Kvelertak"] and r["checked"]          # the unplayable ones are gone; Mastodon is already played
     assert all(t["uri"].startswith("spotify:track:") for a in r["artists"] for t in a["tracks"])
+    dt = r["artists"][0]
+    assert (dt["tags"], dt["album"]) == (["melodic death metal", "swedish"], "Damage Done")       # genre bubbles and their biggest album
+    assert all(x["src"] != "you" for a in r["artists"] for x in a["reasons"])                     # no "your data" line any more
     assert discover.cached("12m") == r
     assert store.cache_get("spotify:artist:obscuredemoband", 10**9) == []       # remembered as "not on Spotify"
     monkeypatch.setattr(discover, "SHOW_EACH", 1)                              # each group fills to its own limit
@@ -462,3 +471,57 @@ def test_played_matches_the_way_music_companion_does(lib):
     assert library.norm_title("Tomorrow’s Dream – Héllo & Goodbye (2009 Remaster)") == "tomorrows dream – hello and goodbye".replace("–", "").replace("  ", " ")
     shelf = {t["title"]: t["plays"] for t in library.shelf("mixed") if t["artist"] == "Mastodon"}
     assert shelf["Oblivion"] == 50 and shelf["Quintessence - Live at the Aragon"] == 3 and shelf["The Czar"] == 0
+
+
+@sync
+async def test_lastfm_tags_leave_out_the_noise(monkeypatch):
+    store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
+    async def call(method, **params):
+        assert method == "artist.getTopTags"
+        return {"toptags": {"tag": [{"name": n, "count": c} for n, c in [("melodic death metal", 100), ("seen live", 90), ("Dark Tranquillity", 80),
+                                                                             ("swedish", 60), ("metal", 50), ("rare tag", 3), ("death metal", 40), ("gothenburg", 30)]]}}
+    monkeypatch.setattr(lastfm, "call", call)
+    assert await lastfm.top_tags("Dark Tranquillity") == ["melodic death metal", "swedish", "metal", "death metal"]
+
+
+def test_queue_adds_their_top_10_or_a_whole_album(owner_client, spotify, monkeypatch):
+    from app.music import player
+    queued = []
+    async def api(method, path, params=None, json=None):
+        if path == "/me/player/queue":
+            queued.append(params["uri"])
+        return None
+    async def target():
+        return "dev1"
+    async def top(artist, limit=10):
+        return [f"Song {i}" for i in range(1, 11)]
+    async def albums(q, kind="track", limit=10):
+        if kind == "album":
+            return [{"id": "alb1", "uri": "spotify:album:alb1", "name": "Damage Done", "artists": [{"name": "Dark Tranquillity"}]}]
+        return await spotify.search(q, kind, limit)
+    async def album_tracks(album_id):
+        return [{"uri": f"spotify:track:a{i}"} for i in range(12)]
+    monkeypatch.setattr(sp.client, "api", api)
+    monkeypatch.setattr(player, "_target", target)
+    monkeypatch.setattr(lastfm, "top_tracks", top)
+    monkeypatch.setattr(sp.client, "search", albums)
+    monkeypatch.setattr(sp.client, "album_tracks", album_tracks)
+    r = owner_client.post(f"{API}/queue", json={"kind": "artist", "artist": "Dark Tranquillity"}).json()
+    assert r["queued"] == 10 and len(queued) == 10                                        # in Last.fm's order
+    queued.clear()
+    r = owner_client.post(f"{API}/queue", json={"kind": "album", "artist": "Dark Tranquillity", "title": "Damage Done"}).json()
+    assert (r["queued"], r["what"]) == (12, "Damage Done") and queued[0] == "spotify:track:a0"
+
+
+
+def test_a_track_too_short_to_scrobble_is_never_a_deep_cut(lib):
+    # Last.fm never counts a play of a track of 30 s or less, so it would sit in Deep cuts forever ("Embryo", 0:23)
+    assert "Divinations" in {t["title"] for t in library.deep_cuts(top_n=5, days=365)}
+    con = sqlite3.connect(lib)
+    con.execute("CREATE TABLE track_lengths (album_id INTEGER, title TEXT, length_ms INTEGER, source TEXT, PRIMARY KEY (album_id, title))")
+    con.execute("INSERT INTO track_lengths VALUES (20, 'Divinations', 23000, 'lastfm'), (20, 'Quintessence', 327000, 'lastfm')")
+    con.commit()
+    con.close()
+    library.forget()
+    deep = {t["title"] for t in library.deep_cuts(top_n=5, days=365)}
+    assert "Divinations" not in deep and "Quintessence" in deep

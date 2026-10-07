@@ -12,7 +12,7 @@ import { musicRowWith, vinylRowWith, preorderRowWith, narrow } from './content-c
 
 const API = '/api/owner/music';
 const root = $('#view-listen');
-const TABS = [['playlists', 'Playlists', 'list'], ['discover', 'Discover', 'spark'], ['rediscover', 'Rediscover', 'history'], ['gigs', 'Gigs', 'bolt'], ['releases', 'Releases', 'disc'], ['vinyl', 'Vinyl', 'radar']];
+const TABS = [['playlists', 'Playlists', 'list'], ['discover', 'Discover', 'spark'], ['rediscover', 'Rediscover', 'history'], ['gigs', 'Gigs', 'bolt'], ['releases', 'Releases', 'disc'], ['vinyl', 'Vinyl', 'radar'], ['buying', 'Worth buying', 'bag']];
 const SRC_LABEL = { history: 'history', shelf: 'shelf', deep: 'deep cut', gig: 'setlist', new: 'new release', similar: 'last.fm', related: 'musicbrainz', tag: 'last.fm tag' };
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -34,6 +34,7 @@ let gigsData = null, gigSel = null;
 const predictions = {};    // artist -> prediction | 'loading' | {error}
 const cands = {};          // track pos -> candidate list (unmatched songs)
 const rel = { filter: 'all', search: '' }, vin = { mode: 'radar', filter: 'all' };
+let buy = null, buyShow = store.get('mu-buy', 'deals');   // GET /buying; show albums with a deal, or all
 let bar = ['full', 'compact', 'hidden'].includes(store.get('mu-bar')) ? store.get('mu-bar') : 'full';
 let pl = null, plAt = 0, devMenu = null;                     // player state, when it was read, open device menu
 let es = null;
@@ -102,6 +103,7 @@ function onMusicEvent(what) {
   clearTimeout(evTimer);
   evTimer = setTimeout(async () => {
     if (what === 'discover') { if (tab === 'discover') await loadDiscover(); return; }
+    if (what === 'buying') { if (tab === 'buying') await loadBuying(); return; }
     await loadOverview();
     if (what === 'playlists' && cur && !editingNow()) { await loadPlaylist(cur.id, false); if (tab === 'playlists') renderPreview(); }
     renderTop();
@@ -147,6 +149,7 @@ function renderPanel() {
   else if (tab === 'rediscover') { panel.innerHTML = rediscoverHtml(); if (!redis) loadRediscover(); }
   else if (tab === 'gigs') { panel.innerHTML = gigsHtml(); if (!gigsData) loadGigs(); }
   else if (tab === 'releases') { panel.innerHTML = releasesHtml(); shelfBadges(panel); }
+  else if (tab === 'buying') { panel.innerHTML = buyingHtml(); loadBuying(); }
   else { panel.innerHTML = vinylHtml(); shelfBadges(panel); }
 }
 
@@ -353,21 +356,18 @@ function discoverHtml() {
   if (!d) return head + '<div class="mu-empty"><span class="spin"></span></div>';
   const errs = d.result?.errors?.length ? `<p class="err-line">${esc(d.result.errors.join(' · '))}</p>` : '';
   const list = (d.result?.artists || []).filter(a => disc.filter === 'all' || (disc.filter === 'never' ? !a.plays : a.plays > 0));
-  const following = new Set(d.following);
-  const norm = s => s.toLowerCase().replace(/&/g, 'and').replace(/^the\s+/, '').replace(/[^\p{L}\p{N}]+/gu, '');
-  const songs = a => (a.tracks || []).map(t => (typeof t === 'string' ? { title: t, uri: '' } : t));      // older results carried titles only
-  const cards = list.length ? `<div class="dgrid">${list.map(a => {
-    const fol = following.has(norm(a.artist)), tracks = songs(a);
-    return `<article class="card dc" data-mu-artist="${esc(a.artist)}"><div class="card__in">
+  const tcase = s => s.replace(/(^|[\s-])(\p{L})/gu, (m, sp, c) => sp + c.toUpperCase());      // "melodic death metal" -> "Melodic Death Metal"
+  const dopt = (icon, label, sub, what, extra = '') => `<div class="dc__opt"><span class="dc__what">${ico(icon)}<span>${sub ? `<small>${sub}</small>` : ''}${esc(label)}</span></span>
+      <span class="dc__btns"><button class="btn btn--go" type="button" data-mu-dplay="${what}"${extra} title="Play now">${ico('play')}<span class="bl">Play</span></button>
+      <button class="btn" type="button" data-mu-dqueue="${what}"${extra} title="Add to the end of what’s playing">${ico('plus')}<span class="bl">Queue</span></button></span></div>`;
+  const cards = list.length ? `<div class="dgrid">${list.map(a => `<article class="card dc" data-mu-artist="${esc(a.artist)}"><div class="card__in">
       <div class="dc__top">${art(a.artist, '')}<div><div class="dc__name">${esc(a.artist)}</div>
-        <div class="match"><span class="match__bar"><i style="width:${a.match}%"></i></span>${a.match}% match · ${a.plays ? plays(a.plays) : 'never played'}</div></div></div>
-      <div class="reasons">${a.reasons.map(r => `<div class="reason"><span class="src src--${r.src}">${{ lfm: 'last.fm', mb: 'musicbrainz', you: 'your data' }[r.src] || r.src}</span><span>${esc(r.text)}</span></div>`).join('')}</div>
-      ${tracks.length ? `<div><span class="lbl">Tracks to try</span><div class="try">${tracks.map(t => `<button type="button" data-mu-try="${esc(t.title)}" data-uri="${esc(t.uri)}">${ico('play')}${esc(t.title)}</button>`).join('')}</div></div>` : ''}
-      <div class="dc__acts">
-        <button class="btn" type="button" data-mu-playartist data-uris="${esc(tracks.map(t => t.uri).filter(Boolean).join(' '))}">${ico('play')}Play</button>
-        <button class="btn${fol ? ' is-on' : ''}" type="button" data-mu-follow="${fol ? 'undo' : 'follow'}" title="Releases, Vinyl radar and Gig radar start watching them">${ico(fol ? 'check' : 'userplus')}${fol ? 'Following' : 'Follow'}</button>
-        <button class="btn btn--icon btn--stop" type="button" data-mu-nope title="Not for me — don’t suggest them again">${ico('x')}</button></div></div></article>`;
-  }).join('')}</div>`
+        <div class="match"><span class="match__bar"><i style="width:${a.match}%"></i></span>${a.match}% match · ${a.plays ? plays(a.plays) : 'never played'}</div></div>
+        <button class="btn btn--icon btn--stop dc__nope" type="button" data-mu-nope title="Not for me — don’t suggest them again">${ico('x')}</button></div>
+      ${(a.tags || []).length ? `<div class="dc__tags">${a.tags.map(t => `<span class="gbub">${esc(tcase(t))}</span>`).join('')}</div>` : ''}
+      <div class="reasons">${a.reasons.filter(r => r.src !== 'you').map(r => `<div class="reason"><span class="src src--${r.src}">${{ lfm: 'last.fm', mb: 'musicbrainz' }[r.src] || r.src}</span><span>${esc(r.text)}</span></div>`).join('')}</div>
+      <div class="dc__opts">${dopt('list', 'Top 10 songs', '', 'top')}${a.album ? dopt('disc', a.album, 'Biggest album', 'album', ` data-album="${esc(a.album)}"`) : ''}</div>
+    </div></article>`).join('')}</div>`
     : `<div class="mu-empty">${ico('spark')}<b>${d.running ? 'Finding artists…' : d.result ? 'Nothing to suggest' : 'Not worked out yet'}</b>${d.running ? 'This takes a minute or two the first time.' : d.result ? 'Try a different basis, or Refresh.' : ''}</div>`;
   return head + errs + cards;
 }
@@ -496,6 +496,80 @@ function vinylHtml() {
     <div class="maxbar"><span class="seg" role="group"><button type="button" data-mu-vmode="radar" aria-pressed="${vin.mode === 'radar'}">Vinyl radar</button><button type="button" data-mu-vmode="pre" aria-pressed="${vin.mode === 'pre'}">Confirmed pre-orders</button></span>${bar2}</div>
     <ul class="rows">${body}</ul>
     <div class="fullnote">The same records as Home’s Vinyl radar — purchases, pins and dismissals are shared. “Listen first” plays the album, or before release day the artist’s best-known songs.</div></div></section>`;
+}
+
+// ---- Worth buying: albums you play a lot but don't own, from the Discogs marketplace (app/music/buying.py) ----------------
+async function loadBuying() {
+  try { buy = await api.get(`${API}/buying`); } catch (e) { toast(e.message); return; }
+  if (tab === 'buying') $('#mu-panel').innerHTML = buyingHtml();
+}
+
+const gbp = n => `£${Number(n).toFixed(n % 1 ? 2 : 0)}`;
+const hhmm = epoch => { const d = new Date(epoch * 1000); return `${DAYS[(d.getDay() + 6) % 7]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+function buyCell(kind, c, a) {
+  const fv = a.first_vinyl_year, later = fv && a.original_year && fv > a.original_year;   // a CD-era album: its first vinyl came later
+  const label = kind === 'original' ? (later ? `First vinyl press · ${fv}` : `Original${fv || a.original_year ? ` · ${fv || a.original_year}` : ''}`) : 'Coloured edition';
+  const where = p => [p.colour && kind === 'coloured' ? p.colour : null, p.country, p.label, kind === 'coloured' && p.year ? p.year : null].filter(Boolean).map(esc).join(' · ');
+  const links = p => `<a class="btn btn--go" href="${esc(safeUrl(p.sell_url))}" target="_blank" rel="noopener" title="Copies for sale from UK sellers">${ico('bag')}<span class="bl">Buy</span></a>
+    <a class="btn btn--icon" href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener" title="This pressing on Discogs">${ico('ext')}</a>`;
+  // the VG+ guide price leads; the marketplace's lowest is only a hint (any condition, any country, before postage)
+  const hint = p => p.price != null ? `<span class="buy__hint" title="The lowest listed price: any condition, from any country, before postage">from ${gbp(p.price)} listed</span>` : '';
+  let body;
+  if (c.best) {
+    const p = c.best;
+    body = `<div class="buy__price"><b>${gbp(p.usual)}</b><span>VG+ guide</span><span>${p.for_sale} for sale</span></div>
+      <div class="buy__what">${where(p)}</div><div class="buy__acts">${links(p)}${hint(p)}</div>`;
+  } else if (c.cheapest) {
+    const p = c.cheapest;
+    const msg = p.usual != null ? `VG+ guide <b>${gbp(p.usual)}</b> — over your ${gbp(buy.max_price)}` : `No VG+ guide price on Discogs`;
+    body = `<div class="buy__none">${msg}</div><div class="buy__what">${where(p)}</div>
+      <div class="buy__acts"><a class="btn btn--icon" href="${esc(safeUrl(p.sell_url))}" target="_blank" rel="noopener" title="UK sellers, cheapest first">${ico('ext')}</a>${hint(p)}</div>`;
+  } else {
+    body = `<div class="buy__none">${c.known ? 'None for sale right now' : kind === 'original' ? 'No original vinyl on Discogs' : 'No coloured editions'}</div>`;
+  }
+  return `<div class="buy__cell${c.best ? ' is-deal' : ''}"><span class="buy__kind">${label}</span>${body}</div>`;
+}
+
+function skippedNote(sk) {
+  const pre = sk?.preordered || [], comp = sk?.compilations || [];
+  if (!pre.length && !comp.length) return '';
+  const list = (label, xs) => xs.length ? `<span title="${esc(xs.join('\n'))}">${label}: ${esc(xs.slice(0, 4).join(', '))}${xs.length > 4 ? ` +${xs.length - 4} more` : ''}</span>` : '';
+  return `<div class="fullnote buy-skipped">Left out — ${[list('on pre-order', pre), list('compilations', comp)].filter(Boolean).join(' · ')}</div>`;
+}
+
+function buyingHtml() {
+  const card = inner => `<section class="card mcard mu-full" id="mu-buying"><div class="card__in">${inner}</div></section>`;
+  if (!buy) return card(`<div class="mu-empty"><span class="spin"></span></div>`);
+  if (!buy.ready) return card(`<div class="mu-empty">${ico('bag')}<b>Connect Discogs</b>Add a Discogs personal access token in Settings → Music page, and Citadel will look for good prices on the albums you play most but don’t own on vinyl.<br><a class="btn btn--go" href="/settings#listen">Set up Discogs</a></div>`);
+  const retry = label => buy.running ? `<span class="meta"><span class="spin"></span> Checking prices…</span>`
+    : `<button class="btn btn--go" type="button" data-mu-brefresh>${ico('refresh')}<span class="bl">${label}</span></button>`;
+  if (!buy.priced_at) return card(`<div class="mu-empty">${ico('bag')}<b>${buy.error && !buy.running ? 'Couldn’t check prices' : 'Checking prices…'}</b>${esc(buy.error && !buy.running ? buy.error : 'The first run looks up each album on Discogs — it takes about ten minutes. This page fills in when it’s done.')}
+    ${buy.error && !buy.running ? `<br>${retry('Try again')} <a class="btn" href="/settings#listen">Settings</a>` : ''}</div>`);
+  const deal = a => a.original.best || a.coloured.best;
+  const hidden = buy.hidden || [];
+  if (buyShow === 'hidden' && !hidden.length) buyShow = 'deals';
+  const list = buy.albums.filter(a => buyShow === 'all' || deal(a));
+  const rows = list.map(a => `<li class="buy">
+      ${art(a.artist, caa(a.mbid), 'buy__art')}
+      <div class="buy__main"><b>${esc(a.title)}</b><span>${esc(a.artist)}</span>
+        <span class="buy__plays">${plays(a.plays)}${a.recent ? ` · ${a.recent} this year` : ''}</span>
+        ${a.match === 'probable' ? `<span class="chip chip--warn" title="Found by searching Discogs for the title — check it's the right album">probable match</span>` : ''}
+        <a class="buy__master" href="${esc(safeUrl(a.master_url))}" target="_blank" rel="noopener">All pressings ↗</a></div>
+      ${buyCell('original', a.original, a)}${buyCell('coloured', a.coloured, a)}
+      <button class="btn btn--icon buy__x" type="button" data-mu-bnope="${a.album_id}" title="Not interested — stop showing this album">${ico('x')}</button>
+    </li>`).join('');
+  const deals = buy.albums.filter(deal).length;
+  return card(`<div class="mh"><span class="hud">Worth buying</span><span class="meta">${deals} of ${buy.albums.length} albums within ${gbp(buy.max_price)} · prices from ${hhmm(buy.priced_at)}</span>
+      <span class="tools">${buy.error && !buy.running ? `<span class="warn" title="${esc(buy.error)}">${ico('alert')} last check failed</span>` : ''}${retry('Check prices now')}</span></div>
+    <div class="maxbar">${chips([['deals', 'Within budget'], ['all', 'All albums'], ...(hidden.length ? [['hidden', `Hidden (${hidden.length})`]] : [])], buyShow, 'data-mu-bshow')}</div>
+    ${buyShow === 'hidden' ? `<ul class="rows buy-hidden">${hidden.map(h => `<li><span>${esc(h.name)}</span>
+        <button class="btn" type="button" data-mu-bagain="${h.album_id}">${ico('refresh')}<span class="bl">Show again</span></button></li>`).join('')}</ul>
+      <div class="fullnote">Albums you’ve hidden with ✕. Showing one again brings it back at the next price check.</div>`
+    : `<ul class="rows buy-rows">${rows || `<li class="mu-empty">${buyShow === 'deals' ? 'Nothing within budget right now — prices are checked every few hours.' : 'No albums to show.'}</li>`}</ul>
+    ${skippedNote(buy.skipped)}`}
+    <div class="fullnote">Albums you play most but don’t own on vinyl. For each, the original pressing and coloured edition with the lowest <b>VG+ guide price</b> — Discogs’ estimate of what a VG+ copy sells for — at or under your limit (Settings → Music page → Discogs), with copies for sale.
+      Discogs doesn’t share each listing’s grade, location or postage, so the “from £… listed” figure is any condition, from anywhere, before postage. <b>Buy</b> opens UK sellers, cheapest first. <b>Data provided by <a href="https://www.discogs.com/" target="_blank" rel="noopener">Discogs</a>.</b> Citadel uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs.</div>`);
 }
 
 // ---- the player bar --------------------------------------------------------------------------------------------------------
@@ -628,11 +702,15 @@ root.addEventListener('click', async e => {
   if (d.muDfilter) { disc.filter = d.muDfilter; $('#mu-panel').innerHTML = discoverHtml(); return; }
   if ('muDrefresh' in d) { await call(() => api.post(`${API}/discover/refresh?basis=${encodeURIComponent(disc.basis)}`)); await loadDiscover(); return; }
   const artistCard = b.closest('[data-mu-artist]');
-  if (d.muTry && artistCard) { playWhat(d.uri ? { kind: 'uris', uris: [d.uri] } : { kind: 'track', artist: artistCard.dataset.muArtist, title: d.muTry }, d.muTry); return; }
-  if ('muPlayartist' in d) { playWhat(d.uris ? { kind: 'uris', uris: d.uris.split(' ') } : { kind: 'artist', artist: artistCard.dataset.muArtist }, artistCard.dataset.muArtist); return; }
-  if (d.muFollow) {
-    const artist = artistCard.dataset.muArtist;
-    if (await call(() => api.post(`${API}/discover/feedback`, { artist, verdict: d.muFollow === 'undo' ? null : 'follow' }), d.muFollow === 'undo' ? `Stopped following ${artist} here — unfollow fully in Settings → Music` : `Following ${artist} — Releases, Vinyl radar and Gig radar will watch them`)) loadDiscover();
+  if ((d.muDplay || d.muDqueue) && artistCard) {         // a Discover tile: their top 10, or their biggest album
+    const artist = artistCard.dataset.muArtist, what = d.muDplay || d.muDqueue;
+    const body = what === 'album' ? { kind: 'album', artist, title: d.album } : { kind: 'artist', artist };
+    const label = what === 'album' ? d.album : `${artist}’s top 10`;
+    if (d.muDplay) { playWhat(body, label); return; }
+    busy(b, true);
+    const r = await call(() => api.post(`${API}/queue`, body));
+    busy(b, false);
+    if (r) { toast(`Queued ${r.queued} track${r.queued === 1 ? '' : 's'} — ${r.what}`); setTimeout(pollPlayer, 600); }
     return;
   }
   if ('muNope' in d) {
@@ -662,6 +740,26 @@ root.addEventListener('click', async e => {
   if (d.muTrysong) { playWhat({ kind: 'track', artist: d.artist, title: d.muTrysong }); return; }
   // releases / vinyl
   if (d.muRfilter) { rel.filter = d.muRfilter; renderPanel(); return; }
+  if (d.muBagain) {
+    if (!await call(() => api.post(`${API}/buying/${Number(d.muBagain)}/dismiss`, { undo: true }), 'It’ll be back at the next price check')) return;
+    await loadBuying();
+    return;
+  }
+  if ('muBrefresh' in d) {
+    if (!await call(() => api.post(`${API}/buying/refresh`, {}))) return;
+    buy = { ...buy, running: true };
+    $('#mu-panel').innerHTML = buyingHtml();
+    return;
+  }
+  if (d.muBshow) { buyShow = d.muBshow; store.set('mu-buy', buyShow); $('#mu-panel').innerHTML = buyingHtml(); return; }
+  if (d.muBnope) {
+    const id = Number(d.muBnope);
+    if (!await call(() => api.post(`${API}/buying/${id}/dismiss`, {}))) return;
+    buy.albums = buy.albums.filter(a => a.album_id !== id);
+    $('#mu-panel').innerHTML = buyingHtml();
+    toast('Hidden — it won’t be suggested again');
+    return;
+  }
   if (d.muVfilter) { vin.filter = d.muVfilter; renderPanel(); return; }
   if (d.muVmode) { vin.mode = d.muVmode; renderPanel(); return; }
   if (d.muListen) { playWhat({ kind: d.muListen, artist: d.artist, title: d.title }, d.title); return; }

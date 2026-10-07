@@ -299,7 +299,7 @@ def records() -> list[dict[str, Any]]:
                 tl = json.loads(r["tracklist"] or "[]")
             except ValueError:
                 tl = []
-            tracks = [{"pos": t.get("position") or "", "title": t["title"]} for t in tl if t.get("type", "track") == "track" and t.get("title")]
+            tracks = [{"pos": t.get("position") or "", "title": t["title"], "secs": _secs(t.get("duration"))} for t in tl if t.get("type", "track") == "track" and t.get("title")]
             out.append({"album_id": r["album_id"], "artist": r["artist"], "album": r["album"], "year": r["year"], "mbid": r["mbid"], "tracks": tracks})
         return out
     return _memoised("records", build)
@@ -412,6 +412,30 @@ def shelf(mode: str = "mixed") -> list[dict[str, Any]]:
     return out
 
 
+def _secs(text: Any) -> int | None:
+    """"4:32" -> 272 (None if it isn't a time)."""
+    try:
+        parts = [int(p) for p in str(text or "").strip().split(":")]
+    except ValueError:
+        return None
+    if len(parts) < 2:
+        return None
+    total = 0
+    for p in parts:
+        total = total * 60 + p
+    return total or None
+
+
+TOO_SHORT_MS = 30_000        # Last.fm never counts a play of a track this short: it would stay "never played" forever
+
+
+def _short_lines() -> set[tuple[int, str]]:
+    """(album id, lower-case title) of tracklist lines known to be 30 s or less (Music Companion's track_lengths)."""
+    if not _q("SELECT 1 FROM sqlite_master WHERE name = 'track_lengths'"):
+        return set()
+    return {(r["album_id"], r["title"].lower()) for r in _q("SELECT album_id, title FROM track_lengths WHERE length_ms > 0 AND length_ms <= ?", TOO_SHORT_MS)}
+
+
 def deep_cuts(*, top_n: int = 10, days: int = 365) -> list[dict[str, Any]]:
     """Album tracks you've never played, by the artists you play most (MusicBrainz tracklists, plus your pressings')."""
     tops = top_artists(days, top_n)
@@ -419,16 +443,20 @@ def deep_cuts(*, top_n: int = 10, days: int = 365) -> list[dict[str, Any]]:
         return []
     wanted = {anorm(a["name"]): a["name"] for a in tops}
     out, seen = [], set()
-    rows = _q(f"""SELECT t.album_id, a.name AS artist, al.title AS album, al.year, al.mbid, t.title, t.recording_mbid FROM album_tracklists t
+    has_len = any(c["name"] == "length_ms" for c in _q("PRAGMA table_info(album_tracklists)"))
+    rows = _q(f"""SELECT t.album_id, a.name AS artist, al.title AS album, al.year, al.mbid, t.title, t.recording_mbid, {"t.length_ms" if has_len else "NULL AS length_ms"} FROM album_tracklists t
                   JOIN albums al ON al.id = t.album_id JOIN artists a ON a.id = al.artist_id
                   WHERE a.name IN ({','.join('?' * len(wanted))}) ORDER BY al.year, t.position""", *wanted.values())
     pressings = [{"album_id": r["album_id"], "artist": r["artist"], "album": r["album"], "year": r["year"], "mbid": r["mbid"], "title": t["title"], "recording_mbid": None,
-                  "listing": [x["title"] for x in r["tracks"]]}
+                  "listing": [x["title"] for x in r["tracks"]], "length_ms": (t.get("secs") or 0) * 1000 or None}
                  for r in records() if anorm(r["artist"]) in wanted for t in r["tracks"]]
+    short = _short_lines()
     for r in [dict(x) for x in rows] + pressings:
         k = key(r["artist"], r["title"])
         if k in seen or SKIP_TITLE_RE.match(r["title"]) or re.search(r"\b(?:live|demo|instrumental)\b", r["title"], re.I):
             continue
+        if (r.get("length_ms") and r["length_ms"] <= TOO_SHORT_MS) or (r["album_id"], r["title"].lower()) in short:
+            continue                                               # too short to ever be scrobbled ("Embryo", 0:23): not a deep cut
         if played(r["artist"], r["title"], album_id=r["album_id"], recording=r["recording_mbid"], listing=r.get("listing")):
             seen.add(k)
             continue

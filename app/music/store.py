@@ -56,6 +56,8 @@ def learn_secrets() -> None:
     values = [a.get("access_token", ""), a.get("refresh_token", "")]
     for cfg in settings()["services"].values():
         values += [v for k, v in cfg.items() if isinstance(v, str) and k in ("api_key", "client_secret", "client_id")]
+        if isinstance(cfg.get("api_key"), str) and "=" in cfg["api_key"]:          # a key pasted with its name ("DISCOGS_TOKEN=...")
+            values.append(cfg["api_key"].split("=", 1)[1].strip().strip("'\""))
     logbook.learn(values)
 
 

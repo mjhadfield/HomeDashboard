@@ -76,6 +76,39 @@ async def top_tracks(artist: str, limit: int = 10) -> list[str]:
     return await store.cached(f"lastfm:top:{artist.lower()}", MONTH, fetch)
 
 
+# tags that say nothing about the music
+TAG_NOISE = {"seen live", "favorites", "favourites", "favorite", "favourite", "my favorite", "my favourites", "awesome", "albums i own",
+             "spotify", "all", "love", "loved", "good", "cool", "beautiful", "amazing", "epic", "best", "under 2000 listeners",
+             "male vocalists", "female vocalists", "vocalists", "check out", "to listen", "favorite artists", "favourite artists"}
+
+
+async def top_tags(artist: str, n: int = 4) -> list[str]:
+    """An artist's genres as Last.fm's listeners tag them ("melodic death metal"), the noise left out."""
+    async def fetch():
+        data = await call("artist.getTopTags", artist=artist)
+        return [t["name"] for t in (data.get("toptags") or {}).get("tag", []) if int(t.get("count") or 0) >= 10]
+    tags = await store.cached(f"lastfm:tags:{artist.lower()}", MONTH, fetch)
+    me = artist.lower()
+    out = []
+    for t in tags:
+        k = t.strip().lower()
+        if k in TAG_NOISE or k == me or len(k) > 28 or k in out:
+            continue
+        out.append(k)
+        if len(out) == n:
+            break
+    return out
+
+
+async def top_album(artist: str) -> str | None:
+    """An artist's most-listened album on Last.fm ("Biggest album")."""
+    async def fetch():
+        data = await call("artist.getTopAlbums", artist=artist, limit=5)
+        names = [a.get("name") for a in (data.get("topalbums") or {}).get("album", [])]
+        return {"name": next((x for x in names if x and x != "(null)"), None)}
+    return (await store.cached(f"lastfm:topalbum:{artist.lower()}", MONTH, fetch))["name"]
+
+
 async def tag_tracks(tag: str, limit: int = 100) -> list[dict[str, str]]:
     async def fetch():
         data = await call("tag.getTopTracks", tag=tag, limit=limit)

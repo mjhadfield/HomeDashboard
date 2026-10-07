@@ -24,7 +24,7 @@ WEEK = 7 * 86400
 BARELY = 3                     # this many plays or fewer still counts as "barely tried"
 SHOW_EACH = 15                 # never-played and barely-tried artists on the page, each (a 5×3 grid apiece)
 SCAN = 150                     # candidates looked at (on Spotify) to find them
-VERSION = 2                    # bump when what a result holds changes, so an older one is worked out again
+VERSION = 3                    # bump when what a result holds changes, so an older one is worked out again (3: genres + biggest album)
 MB_LINK, MB_CAP = 0.15, 0.3    # a shared member is a bonus on top of Last.fm's similarity, not a reason on its own —
                                # left uncapped, every member's side projects (mostly not on Spotify) crowded everything out
 MONTH = 30 * 86400
@@ -182,8 +182,6 @@ async def build(basis: str = "12m") -> dict[str, Any]:
         counts[group] += 1
     ranked = kept
     best = ranked[0]["score"] if ranked else 1
-    seed_by = {library.anorm(s["name"]): s for s in seed_list}
-    owned = library.owned_by_artist()
     out = []
     for e in ranked:
         reasons = []
@@ -191,11 +189,14 @@ async def build(basis: str = "12m") -> dict[str, Any]:
             reasons.append({"src": "mb", "text": f"Shares a member: {', '.join(e['links'][:2])}"})
         if e["likes"]:
             reasons.append({"src": "lfm", "text": f"Similar to {', '.join(e['likes'][:3])}"})
-        anchor = seed_by.get(library.anorm((e["likes"] or [""])[0])) or {}
-        if anchor:
-            n_owned = owned.get(library.anorm(anchor["name"]), 0)
-            reasons.append({"src": "you", "text": f"You’ve played {anchor['name']} {anchor['plays']:,} times" + (f" · {n_owned} of their records on your shelf" if n_owned else "")})
-        out.append({"artist": e["name"], "match": max(5, round(100 * e["score"] / best)), "plays": e["plays"], "reasons": reasons, "tracks": e["tracks"]})
+        tags, album = [], None
+        if lastfm.service.ready():
+            try:                                                   # genres and their biggest album, for the tile
+                tags, album = await lastfm.top_tags(e["name"]), await lastfm.top_album(e["name"])
+            except ServiceError as err:
+                errors.append(str(err))
+        out.append({"artist": e["name"], "match": max(5, round(100 * e["score"] / best)), "plays": e["plays"], "reasons": reasons,
+                    "tracks": e["tracks"], "tags": tags, "album": album})
     result = {"basis": basis, "label": BASES.get(basis, basis), "built_at": int(time.time()), "artists": out, "errors": errors, "checked": check, "version": VERSION}
     store.cache_put(f"discover:{basis}", result)
     return result

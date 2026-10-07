@@ -195,6 +195,19 @@
 .try button:hover { color: var(--silver-hi); background: var(--accent-wash); }
 .try button .i { width: 14px; height: 14px; color: var(--accent-soft); }
 .dc__acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--edge); }
+.dc__top { position: relative; }
+.dc__top > div { flex: 1; min-width: 0; }
+.dc__nope { align-self: flex-start; }
+.dc__tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.gbub { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--edge-strong); background: var(--accent-wash); color: var(--silver-hi); white-space: nowrap; }
+.dc__opts { display: grid; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--edge); }
+.dc__opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.dc__what { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--silver-hi); font: 14px var(--font-display); }
+.dc__what > .i { width: 16px; height: 16px; color: var(--accent-soft); flex: none; }
+.dc__what > span { display: flex; flex-direction: column; min-width: 0; }
+.dc__what > span, .dc__what small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc__what small { font: 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--silver-dim); }
+.dc__btns { display: flex; gap: 6px; flex: none; }
 .dc__acts .btn:last-child { margin-left: auto; }
 .dc.is-gone { opacity: .25; filter: grayscale(1); transition: opacity .4s, filter .4s; }
 .dhead { display: flex; align-items: baseline; gap: 12px; margin: 28px 0 12px; flex-wrap: wrap; }
@@ -348,6 +361,41 @@
   .mu-full .feed__main { flex-basis: calc(100% - 72px); }
   .mu-full .feed__meta { padding-left: 0 !important; flex-wrap: wrap; }
   .mu-full .bl { display: none; }
+}
+
+/* ---- Worth buying (app/music/buying.py): album | original | coloured edition ---- */
+.buy-rows { padding: 4px 16px 8px; }
+.buy { display: grid; grid-template-columns: 64px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; align-items: stretch;
+  padding: 12px 0; border-bottom: 1px solid var(--edge); }
+.buy:last-child { border-bottom: 0; }
+.buy__art { width: 64px; height: 64px; font-size: 22px; align-self: start; }
+.buy__main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.buy__main b { font-size: 16px; color: var(--silver-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.buy__main > span { color: var(--silver); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.buy__plays { font: 11px var(--font-mono); color: var(--silver-dim) !important; }
+.buy__main .chip { align-self: flex-start; margin-top: 2px; }
+.buy__master { font-size: 12px; color: var(--silver-dim); margin-top: auto; }
+.buy__master:hover { color: var(--accent-hi); }
+.buy__cell { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--edge); background: var(--surface-2); min-width: 0; }
+.buy__cell.is-deal { border-color: color-mix(in srgb, var(--ok) 55%, var(--edge)); background: color-mix(in srgb, var(--ok) 7%, var(--surface-2)); }
+.buy__kind { font: 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--silver-dim); }
+.buy__price { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.buy__price b { font-size: 20px; color: var(--ok); }
+.buy__price span { font: 11px var(--font-mono); color: var(--silver-dim); }
+.buy__what { font-size: 12px; color: var(--silver); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.buy__none { font-size: 13px; color: var(--silver-mute); }
+.buy__none b { color: var(--silver); }
+.buy__acts { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; }
+.buy__x { align-self: start; }
+.buy__hint { align-self: center; margin-left: 4px; font: 11px var(--font-mono); color: var(--silver-mute); }
+.buy-hidden { padding: 4px 16px 8px; }
+.buy-hidden li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--edge); color: var(--silver); }
+.buy-skipped { color: var(--silver-dim); }
+@media (max-width: 1000px) {
+  .buy { grid-template-columns: 56px minmax(0, 1fr) auto; gap: 10px 12px; }
+  .buy__art { width: 56px; height: 56px; }
+  .buy__cell { grid-column: 1 / -1; }
+  .buy__x { grid-column: 3; grid-row: 1; }
 }
 
 /* Citadel's toasts sit above the player bar on this page rather than on top of it */
