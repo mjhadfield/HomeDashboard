@@ -11,7 +11,7 @@ from typing import Any
 
 from .. import db
 from ..content import norm
-from .library import anorm, clean_title
+from .library import anorm, clean_title, key as key_of
 from .services.spotify import client
 
 RETRY_MISSING = 30 * 86400
@@ -123,3 +123,27 @@ async def candidates(artist: str, title: str) -> list[dict[str, Any]]:
         out.append({"uri": i["uri"], "name": i["name"], "artist": ", ".join(a["name"] for a in i.get("artists", [])),
                     "album": (i.get("album") or {}).get("name", ""), "year": ((i.get("album") or {}).get("release_date") or "")[:4]})
     return out[:8]
+
+
+async def artist_songs(artist: str, titles: list[str], want: int | None = None) -> list[dict[str, str]]:
+    """[{title, uri}]: an artist's songs Spotify can play, in the order of `titles` (their best known first). One search
+    covers the lot rather than one or two per song: songs matched before come from memory, the rest are looked for among
+    the artist's tracks (one search, ten at most — Spotify's limit). If none of `titles` is there, those ten stand in."""
+    keys = {t: key_of(artist, t) for t in titles}
+    known = remembered(list(keys.values()))
+    found = {t: m["uri"] for t in titles if (m := known.get(keys[t])) and m["status"] != "missing" and m["uri"]}
+    need = [t for t in titles if t not in found]
+    items: list[dict[str, Any]] = []
+    if (need and (want is None or len(found) < want)) or not found:
+        want_a = anorm(artist)
+        items = [i for i in await client.search(f'artist:"{_q(artist)}"', "track", 10)
+                 if want_a in {anorm(a.get("name", "")) for a in i.get("artists", [])}]
+        for t in need:
+            if hit := best(items, artist, t):
+                remember(keys[t], "ok", hit)          # a miss isn't remembered: ten tracks don't prove Spotify lacks a song
+                found[t] = hit["uri"]
+    out = [{"title": t, "uri": found[t]} for t in titles if t in found]
+    if not out:
+        seen = set()
+        out = [{"title": i["name"], "uri": i["uri"]} for i in items if not (i["uri"] in seen or seen.add(i["uri"]))]
+    return out[:want] if want else out

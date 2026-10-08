@@ -110,6 +110,18 @@ function setSqlSrc() {
   sqlSrcSet = true;
 }
 
+// Same "set once" latch again, for the Odysseus page — mirrors setMediaSrc() exactly (a link only, no theme
+// messaging: like Jellyfin, Odysseus has its own look and doesn't listen for Citadel's).
+const aiFrame = $('#ai-frame');
+let aiSrcSet = false;
+function setAiSrc() {
+  if (aiSrcSet) return;
+  const link = state.links.find(l => l.for_ai);
+  if (!link) return;
+  aiFrame.src = link.url;
+  aiSrcSet = true;
+}
+
 // The shortcut row across the top (Settings → Widgets → Shortcuts): invisible until something is configured,
 // or when it's switched off there. Links open in a new tab.
 let shortcutsKey = null;
@@ -142,6 +154,7 @@ function renderAll() {
   setMediaSrc();
   setMusicSrc();
   setSqlSrc();
+  setAiSrc();
   music.onState(state);
   $('#host-label').textContent = `${state.host} · ${location.hostname}`;
   $('#device-label').textContent = `${state.device.role === 'owner' ? 'Owner' : state.device.role} device`;
@@ -158,10 +171,17 @@ async function pollMonitoring() {
   renderCard('monitoring');
 }
 
-// ---- view router (Home / News / Media / Companion / SQL DB / Music) --------------------------------------------------------------
-const VIEWS = ['home', 'news', 'media', 'music', 'sql', 'listen'];
+// ---- view router (Home / News / Media / Companion / SQL DB / Music / Odysseus) --------------------------------------------------------------
+const VIEWS = ['home', 'news', 'media', 'music', 'sql', 'listen', 'ai'];
+// While an embedded page is showing, the phone keyboard shrinks the screen (interactive-widget=resizes-content) rather
+// than sliding over it, so the pinned page (dashboard.css, .main:has(...)) ends just above the keyboard and a chat box
+// at the bottom of it stays visible. Only on those pages: Home, News and Music keep the browser's default.
+const FRAME_VIEWS = ['media', 'music', 'sql', 'ai'];
+const viewportMeta = $('meta[name="viewport"]');
+const VIEWPORT = viewportMeta.content;
 function route() {
   const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home';
+  viewportMeta.content = FRAME_VIEWS.includes(v) ? `${VIEWPORT}, interactive-widget=resizes-content` : VIEWPORT;
   $$('.view').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   $$('.rail a[data-view], .tabbar a[data-view]').forEach(a => {
     if (a.dataset.view === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');

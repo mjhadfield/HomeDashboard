@@ -193,23 +193,22 @@ class PlayIn(BaseModel):
     playlist_id: int | None = None
     start: int = 0
     uris: list[str] = []
+    uri: str = Field("", max_length=80)                  # an album Discover already found: played without searching again
 
 
-async def _top_uris(artist: str, n: int = 10) -> list[str]:
-    """An artist's top songs on Spotify, in order: Last.fm's most played (Spotify no longer shares its own top tracks),
-    else Spotify's search."""
-    titles = await discover.artist_tracks(artist, n)
-    found = await matcher.match([{"key": library.key(artist, t), "title": t, "artist": artist} for t in titles])
-    uris = [found[library.key(artist, t)] for t in titles if found.get(library.key(artist, t))]
-    if not uris:
-        items = await sp.client.search(f'artist:"{artist}"', "track", 10)
-        uris = [i["uri"] for i in items if library.anorm(artist) in {library.anorm(a["name"]) for a in i.get("artists", [])}]
-    return uris
+async def _album_hit(artist: str, title: str, uri: str = "") -> dict[str, str] | None:
+    """{uri, name} of an album on Spotify: the one Discover found, else one search (remembered for a month)."""
+    if uri.startswith("spotify:album:"):
+        return {"uri": uri, "name": title}
+    return await discover.spotify_album(artist, title, exact=True) or None
 
 
-async def _album_hit(artist: str, title: str) -> dict[str, Any] | None:
-    albums = await sp.client.search(f'album:"{title}" artist:"{artist}"', "album", 5)
-    return next((a for a in albums if library.anorm(artist) in {library.anorm(x["name"]) for x in a.get("artists", [])}), None)
+async def _biggest(artist: str) -> dict[str, str]:
+    """Their biggest album (Last.fm) on Spotify — for an artist whose new album isn't out yet."""
+    hit = await discover.spotify_album(artist, await discover.biggest_album(artist))
+    if not hit:
+        raise ServiceError(f"Couldn’t find {artist} on Spotify")
+    return hit
 
 
 async def _play(body: PlayIn) -> dict[str, Any]:
@@ -224,15 +223,11 @@ async def _play(body: PlayIn) -> dict[str, Any]:
     if body.kind == "uris":
         await player.play_uris([u for u in body.uris if u.startswith("spotify:track:")])
         return {"what": ""}                                         # the page names what it asked for
-    if body.kind == "album":
-        hit = await _album_hit(body.artist, body.title)
-        if hit:
-            await player.play_uris([], context=hit["uri"])
-            return {"what": hit["name"]}
-        body.kind = "artist"                                       # not out yet (or not on Spotify): their best-known songs instead
-    if body.kind == "artist":
-        await player.play_uris(await _top_uris(body.artist))
-        return {"what": f"{body.artist} — their top 10"}
+    if body.kind in ("album", "artist"):                          # an artist: their biggest album (Citadel plays albums, not top 10s)
+        hit = await _album_hit(body.artist, body.title, body.uri) if body.kind == "album" else None
+        hit = hit or await _biggest(body.artist)                   # not out yet (or not on Spotify): their biggest album instead
+        await player.play_uris([], context=hit["uri"])
+        return {"what": hit["name"] or body.title}
     hit = await matcher.search_track(body.artist, body.title)
     if not hit:
         raise ServiceError(f"Couldn’t find “{body.title}” by {body.artist} on Spotify")
@@ -246,16 +241,14 @@ async def play(body: PlayIn):
 
 
 async def _queue(body: PlayIn) -> dict[str, Any]:
-    """Add to the end of what's playing (the desktop client's "Add to queue"): an artist's top 10, or a whole album."""
-    if body.kind == "album":
-        hit = await _album_hit(body.artist, body.title)
-        if not hit:
-            raise ServiceError(f"Couldn’t find {body.title} by {body.artist} on Spotify")
-        uris, what = [t["uri"] for t in await sp.client.album_tracks(hit["id"]) if t.get("uri")], hit["name"]
-    elif body.kind == "artist":
-        uris, what = await _top_uris(body.artist), f"{body.artist}’s top 10"
-    else:
-        raise HTTPException(422, "queue an artist's top 10 or an album")
+    """Add a whole album to the end of what's playing (the desktop client's "Add to queue"). Spotify takes queued tracks one
+    call each, so this is the costliest button on the page — it only ever happens when pressed."""
+    if body.kind != "album":
+        raise HTTPException(422, "queue an album")
+    hit = await _album_hit(body.artist, body.title, body.uri)
+    if not hit:
+        raise ServiceError(f"Couldn’t find {body.title} by {body.artist} on Spotify")
+    uris, what = [t["uri"] for t in await sp.client.album_tracks(hit["uri"].rsplit(":", 1)[-1]) if t.get("uri")], hit["name"] or body.title
     if not uris:
         raise ServiceError("Couldn’t find that on Spotify")
     await player.queue_uris(uris)

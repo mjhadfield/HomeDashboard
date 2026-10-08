@@ -2,8 +2,8 @@
 Citadel just steers it. If nothing is open, "Open Spotify" starts the desktop app on this PC (as a transient user unit,
 the same way Citadel starts a desktop project) and moves playback to it once it shows up.
 
-The page polls this every few seconds while it's open; answers are shared for a moment so several open pages don't
-each ask Spotify."""
+The page polls this every few seconds while it's open; answers are shared for a few seconds so several open pages don't
+each ask Spotify, and while Spotify has asked Citadel to wait the page is told so without asking it at all."""
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +20,7 @@ from .services.base import ServiceError
 
 _cache: tuple[float, dict[str, Any]] | None = None
 _liked: dict[str, bool] = {}
-SHARE = 1.5
+SHARE = 4.0
 UNIT = "spotify-desktop"
 
 
@@ -35,6 +35,8 @@ async def state(fresh: bool = False) -> dict[str, Any]:
     global _cache
     if not sp.service.ready():
         return {"ready": False, "why": "Spotify isn’t connected" if sp.service.configured() else "Spotify isn’t set up"}
+    if until := sp.resting_until():
+        return {"ready": True, "active": False, "error": sp.resting_message(until), "resting_until": until}
     if not fresh and _cache and time.time() - _cache[0] < SHARE:
         return _cache[1]
     data = await sp.client.api("GET", "/me/player", params={"additional_types": "track"})
@@ -152,8 +154,8 @@ async def open_desktop() -> dict[str, Any]:
     except procs.ProcError as e:
         raise ServiceError(f"Couldn’t start Spotify: {e}")
     host = socket.gethostname().lower()
-    for _ in range(20):
-        await asyncio.sleep(1.5)
+    for _ in range(10):                                  # every 3 s for half a minute: each look is a Spotify call
+        await asyncio.sleep(3)
         try:
             devs = await devices()
         except ServiceError:

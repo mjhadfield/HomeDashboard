@@ -53,6 +53,7 @@ function linkForm(l = {}) {
       ${check('for_media', 'Use as Media view', l.for_media, '')}
       ${check('for_music', 'Use as Companion view', l.for_music, '')}
       ${check('for_sql', 'Use as SQL DB view', l.for_sql, '')}
+      ${check('for_ai', 'Use as Odysseus view', l.for_ai, '')}
     </div>
     <div class="form-actions">${act('cancel', 'Cancel')}<button class="btn btn--solid" type="submit">Save link</button></div></form>`;
 }
@@ -752,7 +753,7 @@ panel.addEventListener('submit', e => {
   const f = e.target, kind = f.dataset.form;
   if (kind === 'link') {
     const body = { name: val(f, 'name'), subtitle: val(f, 'subtitle'), url: val(f, 'url'), icon: val(f, 'icon'), health_url: val(f, 'health_url') || null,
-      is_primary: on(f, 'is_primary'), show_guest: on(f, 'show_guest'), tier: on(f, 'more') ? 'more' : 'main', pinned: on(f, 'pinned'), for_media: on(f, 'for_media'), for_music: on(f, 'for_music'), for_sql: on(f, 'for_sql') };
+      is_primary: on(f, 'is_primary'), show_guest: on(f, 'show_guest'), tier: on(f, 'more') ? 'more' : 'main', pinned: on(f, 'pinned'), for_media: on(f, 'for_media'), for_music: on(f, 'for_music'), for_sql: on(f, 'for_sql'), for_ai: on(f, 'for_ai') };
     const id = f.dataset.id;
     run(async () => { await (id ? api.put(`/api/owner/links/${id}`, body) : api.post('/api/owner/links', body)); editing = null; }, 'Link saved');
   } else if (kind === 'project') {

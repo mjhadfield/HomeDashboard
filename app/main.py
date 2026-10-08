@@ -30,7 +30,8 @@ for _noisy in ("httpx", "httpcore"):
 # load-balanced storage nodes (iaNNNNNN.us.archive.org, which one varies and isn't a fixed list) — verified
 # live, not guessed. The browser enforces img-src against that final URL, so a wildcard subdomain is the only
 # workable allowlist here, even though every image is only ever *linked* from coverartarchive.org itself.
-# frame-src is Jellyfin (Media page), Music Companion (Companion page) and the Music DB Explorer (SQL DB page) —
+# frame-src is Jellyfin (Media page), Music Companion (Companion page), the Music DB Explorer (SQL DB page) and
+# Odysseus (Odysseus page, :7011 — its own framing rules are widened for Citadel by a proxy in ~/Projects/Odysseus) —
 # fixed addresses, hardcoded here the same way the image hosts above are; if any changes in Settings, this needs
 # a matching edit. i.scdn.co is Spotify's artwork CDN (the Music page's player bar). :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
 # own pages ever creates an iframe pointed at it directly -- Companion's own settings-icon link navigates the
@@ -38,7 +39,7 @@ for _noisy in ("httpx", "httpcore"):
 # context, not just its initial src.
 CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644 http://192.168.0.66:7011; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
 
 class NoCacheStatic(StaticFiles):
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI):
     # Data syncs and housekeeping share one scheduler. Events carry only an id; clients re-fetch their own filtered state.
     from .music.scrobble_job import job as scrobbles   # Music Companion's scheduled Last.fm import (no dashboard card)
     from .music.buying import job as buying            # the Music page's "Worth buying" prices from Discogs (no dashboard card)
+    from .music.discover import job as discovering    # the Music page's Discover, redone overnight when stale (no dashboard card)
 
     def on_update(wid: str) -> None:
         if wid in widgets:
@@ -90,7 +92,7 @@ async def lifespan(app: FastAPI):
         elif wid == buying.id:
             music_store.changed("buying")              # the Music page re-reads its prices
 
-    scheduler = Scheduler({**widgets, **maintenance.jobs(), scrobbles.id: scrobbles, buying.id: buying}, on_update)
+    scheduler = Scheduler({**widgets, **maintenance.jobs(), scrobbles.id: scrobbles, buying.id: buying, discovering.id: discovering}, on_update)
     mon = monitor.Monitor()
     rotator = Rotator()                              # rotating playlists on the Music page (app/music/rotator.py)
     app.state.health, app.state.scheduler, app.state.monitor, app.state.rotator = health, scheduler, mon, rotator

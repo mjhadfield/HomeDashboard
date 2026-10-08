@@ -85,6 +85,17 @@
   font: 700 16px var(--font-display); color: rgba(255,255,255,.85); background: linear-gradient(135deg, var(--accent-deep), #14102a); border: 1px solid var(--edge);
   clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); }
 .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.art--sp { clip-path: none; border-radius: 4px; }      /* Spotify's artwork: never cropped, corners rounded 4px (its design guidelines) */
+/* Spotify's full logo, in white on dark themes and black on light (monochrome on coloured backgrounds), never under 70px wide */
+.sp-logo { display: block; height: 20px; width: auto; min-width: 70px; }
+.sp-logo--black, :root[data-theme="light"] .sp-logo--white { display: none; }
+:root[data-theme="light"] .sp-logo--black { display: block; }
+.np__sp, .side__sp { display: inline-block; opacity: .9; }
+.np__sp:hover, .side__sp:hover { opacity: 1; }
+.np__sp { display: none; margin-top: 4px; }                /* on a phone it sits under the artist; wider, beside the heart */
+.side__sp { margin-left: 4px; flex: none; }
+@media (max-width: 760px) { .np__sp { display: inline-block; } .side__sp { display: none; } }
+.cands__from { display: flex; align-items: center; gap: 8px; font: 11px var(--font-mono); color: var(--silver-dim); letter-spacing: .06em; padding: 2px 4px 6px; }
 .art--b { background: linear-gradient(135deg, #2b2f3a, #0f1015); } .art--c { background: linear-gradient(135deg, #6d28d9, #1e1b4b); } .art--d { background: linear-gradient(135deg, #4b5563, #1f1b2e); }
 .mu-empty { padding: 40px 20px; text-align: center; color: var(--silver-mute); }
 .mu-empty .i { width: 32px; height: 32px; color: var(--accent-soft); }
@@ -210,6 +221,9 @@
 .dc__btns { display: flex; gap: 6px; flex: none; }
 .dc__acts .btn:last-child { margin-left: auto; }
 .dc.is-gone { opacity: .25; filter: grayscale(1); transition: opacity .4s, filter .4s; }
+.vjump { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.vibe { scroll-margin-top: 16px; }
+.vibe:first-of-type .dhead { margin-top: 12px; }
 .dhead { display: flex; align-items: baseline; gap: 12px; margin: 28px 0 12px; flex-wrap: wrap; }
 .dhead h2 { margin: 0; font: 600 18px var(--font-display); color: var(--silver-hi); letter-spacing: .03em; }
 .dhead p { margin: 0; font: 12px var(--font-mono); color: var(--silver-dim); }
@@ -292,8 +306,8 @@
 .side { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .mu .side .vol { width: 84px; flex: none; }
 .side .sizer { display: flex; gap: 2px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--edge); }
-.dev { position: relative; min-width: 0; }
-.dev__btn { max-width: 160px; }
+.dev { position: relative; min-width: 0; display: flex; }
+.dev__btn { max-width: 160px; min-width: 0; }               /* shrinks (name cut short) rather than run under the volume */
 .dev__btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev__btn.is-live { color: var(--ok); }
 .dev__menu { position: absolute; right: 0; bottom: calc(100% + 12px); width: 300px; padding: 6px; z-index: 50; background: var(--surface-2); border: 1px solid var(--edge-strong);
@@ -336,6 +350,8 @@
 @media (max-width: 760px) {
   .mu { --bar-gap: 10px; }
   .mu__panel { padding-bottom: calc(var(--bar-h) + 90px); }
+  .dtool { gap: 6px; }
+  .dtool > .fchip { padding: 6px 7px; letter-spacing: .04em; }      /* All / Never played / Barely tried / By vibe: one row on a phone */
   .mu-bar { left: 8px; right: 8px; bottom: 70px; gap: 8px; padding: 0 8px; grid-template-columns: minmax(0, 1fr) auto auto; }
   .mu-bar .ctl__b [data-mu-cmd="shuffle"], .mu-bar .ctl__b [data-mu-cmd="repeat"], .mu-bar .ctl__b [data-mu-cmd="previous"], .mu-bar .np__fact, .dev__btn span { display: none; }
   .mu-bar .np .art { width: 40px; height: 40px; }
@@ -401,4 +417,5 @@
 /* Citadel's toasts sit above the player bar on this page rather than on top of it */
 body:has(#view-listen.is-active .mu:not([data-bar="hidden"])) .toast { bottom: 112px; }
 @media (min-width: 1800px) and (min-height: 860px) { body:has(#view-listen.is-active .mu:not([data-bar="hidden"])) .toast { bottom: 120px; } }
+@media (max-width: 374px) { .dtool > .fchip { font-size: 10.5px; padding: 6px; } }      /* the narrowest phones (360px) */
 @media (max-width: 760px) { body:has(#view-listen.is-active .mu:not([data-bar="hidden"])) .toast { bottom: 170px; } }

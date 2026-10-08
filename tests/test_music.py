@@ -102,9 +102,20 @@ class FakeSpotify:
     """Stands in for the Spotify Web API client."""
     def __init__(self):
         self.calls, self.made = [], 0
+        self.catalogue = {}                    # artist -> their songs, for an artist-only search (Spotify's 10 at most)
+        self.albums = {}                       # artist -> their albums
 
     async def search(self, q, kind="track", limit=10):
         self.calls.append(("search", q))
+        if kind == "album":
+            artist = q.split('artist:"')[1].split('"')[0]
+            want = q.split('album:"')[1].split('"')[0] if 'album:"' in q else None
+            return [{"uri": f"spotify:album:{abs(hash((artist, a))) % 10**12}", "name": a, "album_type": "album", "artists": [{"name": artist}]}
+                    for a in self.albums.get(artist, []) if want is None or want.lower() in a.lower()][:limit]
+        if q.startswith('artist:"') and 'track:"' not in q:
+            artist = q.split('"')[1]
+            return [{"uri": f"spotify:track:{abs(hash((artist, t))) % 10**12}", "name": t, "artists": [{"name": artist}],
+                     "album": {"name": "x", "album_type": "album"}} for t in self.catalogue.get(artist, [])[:limit]]
         title = q.split('track:"')[1].split('"')[0] if 'track:"' in q else q
         artist = q.split('artist:"')[1].split('"')[0] if 'artist:"' in q else ""
         if "Divinations" in q or not artist:
@@ -417,23 +428,146 @@ async def test_discover_shows_only_artists_spotify_can_play_and_last_fm_leads(li
     monkeypatch.setattr(lastfm, "top_album", album)
     monkeypatch.setattr(mbs, "artist_rels", rels)
     store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
+    spotify.albums.update({"Dark Tranquillity": ["Projector", "Damage Done"], "Kvelertak": ["Meir"]})
     r = await discover.build("12m")
     names = [a["artist"] for a in r["artists"]]
     assert names == ["Dark Tranquillity", "Kvelertak"] and r["checked"]          # the unplayable ones are gone; Mastodon is already played
-    assert all(t["uri"].startswith("spotify:track:") for a in r["artists"] for t in a["tracks"])
-    dt = r["artists"][0]
-    assert (dt["tags"], dt["album"]) == (["melodic death metal", "swedish"], "Damage Done")       # genre bubbles and their biggest album
+    assert sum(1 for c in spotify.calls if c[0] == "search") == 2                 # one Spotify search per artist shown
+    assert all(a["album_uri"].startswith("spotify:album:") and "tracks" not in a for a in r["artists"])
+    dt, kv = r["artists"]
+    assert (dt["tags"], dt["album"]) == (["melodic death metal", "swedish"], "Damage Done")       # genre bubbles and their biggest album (Last.fm)
+    assert kv["album"] == "Meir"                                                                  # Last.fm couldn't say: Spotify's first
     assert all(x["src"] != "you" for a in r["artists"] for x in a["reasons"])                     # no "your data" line any more
     assert discover.cached("12m") == r
-    assert store.cache_get("spotify:artist:obscuredemoband", 10**9) == []       # remembered as "not on Spotify"
+    assert store.cache_get("spotify:album:obscuredemoband|", 10**9) == {}        # remembered as "not on Spotify"
     monkeypatch.setattr(discover, "SHOW_EACH", 1)                              # each group fills to its own limit
     assert [a["artist"] for a in (await discover.build("12m"))["artists"]] == ["Dark Tranquillity"]
 
 
-def test_an_unchecked_discover_result_is_redone_once_spotify_is_connected(spotify):
+@sync
+async def test_discover_spreads_its_picks_and_groups_them_by_vibe(lib, monkeypatch):
+    """Gojira (100 plays this year) is death metal, Mastodon (50) stoner rock — so two vibes, the smaller one first."""
     from app.music import discover
-    store.cache_put("discover:12m", {"artists": [], "built_at": int(time.time()), "checked": False})
-    assert discover.cached("12m") is None
+    from app.music.services import lastfm, musicbrainz as mbs
+    similar = {"Gojira": [{"name": "Alpha", "match": 0.9}, {"name": "Bravo", "match": 0.8}, {"name": "Charlie", "match": 0.7}, {"name": "Dub Band", "match": 0.6}],
+               "Mastodon": [{"name": "Alpha", "match": 0.5}, {"name": "Echo", "match": 0.4}, {"name": "Foxtrot", "match": 0.3}]}
+    tagged = {"Gojira": ["death metal", "metal"], "Mastodon": ["metal", "stoner rock"], "Alpha": ["death metal"], "Bravo": ["melodic death metal"],
+              "Charlie": ["metal"], "Dub Band": ["reggae", "dub"], "Echo": ["stoner rock"], "Foxtrot": ["desert rock", "rock"]}
+    async def sim(artist, limit=30):
+        return similar.get(artist, [])
+    async def tags(artist, n=4):
+        return tagged.get(artist, [])[:n]
+    async def top(artist, limit=10):
+        return ["Song"]
+    async def album(artist):
+        return None
+    async def rels(mbid):
+        return {"name": "", "type": "Group", "members": [], "member_of": []}
+    for name, fake in (("similar", sim), ("top_tags", tags), ("top_tracks", top), ("top_album", album)):
+        monkeypatch.setattr(lastfm, name, fake)
+    monkeypatch.setattr(mbs, "artist_rels", rels)
+    store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
+
+    r = await discover.build("12m")
+    alpha = r["artists"][0]
+    assert alpha["artist"] == "Alpha" and alpha["match"] == 90                  # the closest link's own strength, not relative to #1
+    assert alpha["reasons"][-1]["text"] == "Similar to Gojira, Mastodon"
+    assert [a["artist"] for a in r["artists"]] == ["Alpha", "Bravo", "Charlie", "Dub Band", "Echo", "Foxtrot"]   # room for all: best first
+    monkeypatch.setattr(discover, "SHOW_EACH", 4)
+    r = await discover.build("12m")
+    assert [a["artist"] for a in r["artists"]] == ["Alpha", "Bravo", "Echo", "Foxtrot"]   # Gojira leads to only two while others wait
+
+    assert [(v["name"], v["seeds"]) for v in r["vibes"]] == [("Desert & Stoner Rock", ["Mastodon"]), ("Death & Melodeath", ["Gojira"])]
+    desert, death = r["vibes"]
+    assert [a["artist"] for a in desert["artists"]] == ["Echo", "Foxtrot"]       # Alpha is similar to Mastodon too, but it isn't stoner rock
+    assert [a["artist"] for a in death["artists"]] == ["Alpha", "Bravo"]        # Dub Band's reggae; plain "metal" makes Charlie heavy metal
+    assert death["artists"][0]["reasons"][-1]["text"] == "Similar to Gojira"    # only this vibe's seeds count here
+    assert desert["share"] == round(100 * 50 / 150, 1)
+
+
+@sync
+async def test_discover_skips_a_spotify_hiccup_and_your_own_artists_side_names(lib, spotify, monkeypatch):
+    from app.music import discover
+    from app.music.services import lastfm, musicbrainz as mbs
+    async def sim(artist, limit=30):
+        return [{"name": "Gojira & Friends", "match": 1.0}, {"name": "Flaky", "match": 0.9}, {"name": "Steady", "match": 0.8}] if artist == "Gojira" else []
+    async def top(artist, limit=10):
+        return ["Song"]
+    async def nothing(*a, **k):
+        return None
+    async def rels(mbid):
+        return {"name": "", "type": "Group", "members": [], "member_of": []}
+    real_search = spotify.search
+    async def search(q, kind="track", limit=10):
+        if "Flaky" in q:
+            raise ServiceError("Spotify: An unexpected error occurred. Please try again later.")
+        return await real_search(q, kind, limit)
+    monkeypatch.setattr(sp.client, "search", search)
+    for name, fake in (("similar", sim), ("top_tracks", top), ("top_album", nothing)):
+        monkeypatch.setattr(lastfm, name, fake)
+    async def tags(artist, n=4):
+        return []
+    monkeypatch.setattr(lastfm, "top_tags", tags)
+    monkeypatch.setattr(mbs, "artist_rels", rels)
+    store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
+    spotify.albums["Steady"] = ["Steady State"]
+    r = await discover.build("12m")
+    assert [a["artist"] for a in r["artists"]] == ["Steady"]                   # one failed check skips Flaky, not everyone after it
+    assert any("unexpected error" in e for e in r["errors"])
+
+
+@sync
+async def test_discover_leaves_out_solo_careers_and_side_projects(lib, monkeypatch):
+    from app.music import discover
+    from app.music.services import lastfm, musicbrainz as mbs
+    sim = [{"name": "Joe Solo", "match": 1.0, "mbid": "joe"}, {"name": "Mostly Them", "match": 0.7, "mbid": "mostly"},
+           {"name": "Same Crowd", "match": 0.97, "mbid": "crowd"}, {"name": "Once Had Their Drummer", "match": 0.88, "mbid": "fu"},
+           {"name": "Big Family", "match": 1.0, "mbid": "big"},
+           {"name": "Strangers", "match": 0.6, "mbid": "strangers"}, {"name": "No Id", "match": 0.5}]
+    people = lambda *ids: [{"name": i, "mbid": i} for i in ids]
+    rels_by = {"gj": {"type": "Group", "members": people("joe", "mario", "christian", "jean")},
+               "joe": {"type": "Person", "members": []}, "mostly": {"type": "Group", "members": people("joe", "mario", "x")},
+               "crowd": {"type": "Group", "members": people("joe", "a", "b", "c")}, "fu": {"type": "Group", "members": people("jean", "d", "e", "f")},
+               "strangers": {"type": "Group", "members": people("g", "h")}, "big": {"type": "Group", "members": people("jean", *"klmnop")}}
+    async def rels(mbid):
+        return {"name": "", "member_of": [], **rels_by.get(mbid, {"type": "Group", "members": []})}
+    async def similar(artist, limit=30):
+        return sim if artist == "Gojira" else []
+    async def top(artist, limit=10):
+        return ["Song"]
+    async def nothing(*a, **k):
+        return None
+    async def tags(artist, n=4):
+        return []
+    for name, fake in (("similar", similar), ("top_tracks", top), ("top_album", nothing), ("top_tags", tags)):
+        monkeypatch.setattr(lastfm, name, fake)
+    monkeypatch.setattr(mbs, "artist_rels", rels)
+    store.put_settings({**store.settings(), "services": {**store.settings()["services"], "lastfm": {"enabled": True, "api_key": "k" * 32}}})
+    r = await discover.build("12m")
+    assert {a["artist"] for a in r["artists"]} == {"Once Had Their Drummer", "Strangers", "No Id", "Big Family"}   # 1 of 7: its own band
+
+    async def down(mbid):
+        raise RuntimeError("MusicBrainz is busy")
+    monkeypatch.setattr(mbs, "artist_rels", down)                              # can't tell: nothing is hidden
+    r = await discover.build("12m")
+    assert len(r["artists"]) == 7, ([a["artist"] for a in r["artists"]], r["errors"])
+
+
+def test_vibes_prefer_the_specific_tag():
+    from app.music import vibes
+    assert vibes.of(["rock", "ska", "pop"]) == "reggae" and vibes.of(["metal", "german"]) == "heavy" and vibes.of(["seattle"]) is None
+    assert vibes.fits(["reggae", "rock"], "reggae") and not vibes.fits(["reggae", "rock"], "classic") and vibes.fits(["rock"], "classic")
+
+
+def test_an_old_or_unchecked_discover_result_is_kept_until_the_nightly_job_redoes_it(spotify):
+    from app.music import discover
+    fresh = {"artists": [], "built_at": int(time.time()), "checked": True, "version": discover.VERSION}
+    for stale in ({**fresh, "checked": False}, {**fresh, "version": discover.VERSION - 1}, {**fresh, "partial": True},
+                  {**fresh, "built_at": int(time.time()) - discover.WEEK}):
+        store.cache_put("discover:12m", stale)
+        assert discover.cached("12m") == stale and discover.stale("12m")          # still shown (a restart costs Spotify nothing)
+    store.cache_put("discover:12m", fresh)
+    assert not discover.stale("12m")
 
 
 @sync
@@ -484,33 +618,36 @@ async def test_lastfm_tags_leave_out_the_noise(monkeypatch):
     assert await lastfm.top_tags("Dark Tranquillity") == ["melodic death metal", "swedish", "metal", "death metal"]
 
 
-def test_queue_adds_their_top_10_or_a_whole_album(owner_client, spotify, monkeypatch):
+def test_play_and_queue_are_albums_and_reuse_what_discover_found(owner_client, spotify, monkeypatch):
     from app.music import player
-    queued = []
+    queued, played = [], []
     async def api(method, path, params=None, json=None):
         if path == "/me/player/queue":
             queued.append(params["uri"])
+        if path == "/me/player/play":
+            played.append(json)
         return None
     async def target():
         return "dev1"
-    async def top(artist, limit=10):
-        return [f"Song {i}" for i in range(1, 11)]
-    async def albums(q, kind="track", limit=10):
-        if kind == "album":
-            return [{"id": "alb1", "uri": "spotify:album:alb1", "name": "Damage Done", "artists": [{"name": "Dark Tranquillity"}]}]
-        return await spotify.search(q, kind, limit)
+    async def album(artist):
+        return "Damage Done"
     async def album_tracks(album_id):
+        assert album_id == "alb1"
         return [{"uri": f"spotify:track:a{i}"} for i in range(12)]
     monkeypatch.setattr(sp.client, "api", api)
     monkeypatch.setattr(player, "_target", target)
-    monkeypatch.setattr(lastfm, "top_tracks", top)
-    monkeypatch.setattr(sp.client, "search", albums)
+    monkeypatch.setattr(lastfm, "top_album", album)
+    monkeypatch.setattr(lastfm.service, "ready", lambda: True)
     monkeypatch.setattr(sp.client, "album_tracks", album_tracks)
-    r = owner_client.post(f"{API}/queue", json={"kind": "artist", "artist": "Dark Tranquillity"}).json()
-    assert r["queued"] == 10 and len(queued) == 10                                        # in Last.fm's order
-    queued.clear()
-    r = owner_client.post(f"{API}/queue", json={"kind": "album", "artist": "Dark Tranquillity", "title": "Damage Done"}).json()
+    r = owner_client.post(f"{API}/queue", json={"kind": "album", "artist": "Dark Tranquillity", "title": "Damage Done", "uri": "spotify:album:alb1"}).json()
     assert (r["queued"], r["what"]) == (12, "Damage Done") and queued[0] == "spotify:track:a0"
+    assert not [c for c in spotify.calls if c[0] == "search"]                              # Discover's album: no search
+    assert owner_client.post(f"{API}/queue", json={"kind": "artist", "artist": "Dark Tranquillity"}).status_code == 422     # no top 10s
+    spotify.albums["Dark Tranquillity"] = ["Projector", "Damage Done"]
+    r = owner_client.post(f"{API}/play", json={"kind": "artist", "artist": "Dark Tranquillity"}).json()            # not out yet: biggest album
+    assert r["what"] == "Damage Done" and played[-1]["context_uri"].startswith("spotify:album:")
+    owner_client.post(f"{API}/play", json={"kind": "artist", "artist": "Dark Tranquillity"})
+    assert len([c for c in spotify.calls if c[0] == "search"]) == 1                        # remembered: the second play searched nothing
 
 
 

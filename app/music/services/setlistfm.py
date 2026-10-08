@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from ... import __version__, config
 from .. import store
 from .base import Field, Service, ServiceError
 
@@ -45,7 +46,8 @@ async def call(path: str, **params: Any) -> dict[str, Any]:
         wait = _last + MIN_GAP - time.monotonic()
         if wait > 0:
             await asyncio.sleep(wait)
-        async with httpx.AsyncClient(timeout=20, headers={"x-api-key": key, "Accept": "application/json", "Accept-Language": "en"}) as http:
+        async with httpx.AsyncClient(timeout=20, headers={"x-api-key": key, "Accept": "application/json", "Accept-Language": "en",
+                                                         "User-Agent": f"Citadel/{__version__} ({config.CONTACT})"}) as http:
             r = await http.get(API + path, params=params)
         _last = time.monotonic()
     if r.status_code == 404:

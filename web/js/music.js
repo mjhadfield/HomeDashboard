@@ -28,7 +28,7 @@ let active = false, started = false;
 let tab = TABS.some(t => t[0] === store.get('mu-tab')) ? store.get('mu-tab') : 'playlists';
 let cur = null;            // the open playlist, with its tracks
 let selected = Number(store.get('mu-pl', 0)) || null;
-let disc = { basis: store.get('mu-basis', '12m'), filter: 'all', data: null };
+let disc = { basis: store.get('mu-basis', '12m'), filter: ['all', 'never', 'barely', 'vibe'].includes(store.get('mu-dfilter')) ? store.get('mu-dfilter') : 'all', data: null };
 let redis = null;           // GET /rediscover
 let gigsData = null, gigSel = null;
 const predictions = {};    // artist -> prediction | 'loading' | {error}
@@ -91,7 +91,6 @@ async function boot() {
   if (selected) await loadPlaylist(selected, false);
   renderPanel();
   pollPlayer();
-  setInterval(() => { if (active && !document.hidden) pollPlayer(); }, 3000);
   setInterval(tickProgress, 1000);
   document.addEventListener('visibilitychange', () => { if (active && !document.hidden) pollPlayer(); });
   es = new EventSource('/api/owner/events');
@@ -129,6 +128,7 @@ function renderTop() {
   let status;
   if (!s.configured) status = `<a href="/settings#listen"><span class="dot dot--warn"></span> Spotify isn’t set up</a>`;
   else if (s.expired || !s.connected) status = `<a href="/settings#listen"><span class="dot dot--warn"></span> <span class="warn">${s.expired ? 'Spotify login ran out — reconnect' : 'Connect Spotify'}</span></a>`;
+  else if (s.resting) status = `<span class="dot dot--warn"></span> <span class="warn">Spotify paused until ${esc(s.resting.match(/until (.+?) —/)?.[1] || 'later')}</span>`;
   else status = `<span class="dot dot--ok"></span>Spotify${s.user ? ` · ${esc(s.user)}` : ''}${s.days_left != null ? `<span class="dim${s.days_left <= 14 ? ' warn' : ''}"> · login good for ${s.days_left} days</span>` : ''}`;
   const mini = bar === 'hidden' && pl?.active
     ? `<button type="button" class="mu-mini" data-mu-bar="full" title="Show the player"><span class="eq${pl.playing ? ' is-on' : ''}"><i></i><i></i><i></i></span><span>${esc(pl.track.name)} · ${esc(pl.track.artists.join(', '))}</span></button>`
@@ -136,7 +136,8 @@ function renderTop() {
   $('#mu-status').innerHTML = mini + status;
   $('#mu-banner').innerHTML = !ov.library.available
     ? `<div class="mu__banner">${ico('alert')}<span>Music Companion’s database wasn’t found, so playlists from your own listening can’t be built.</span><a class="btn" href="/settings#listen">Settings</a></div>`
-    : !s.connected ? `<div class="mu__banner">${ico('wave')}<span>Connect Spotify to save playlists to your account and control playback. Designing and previewing works already.</span><a class="btn btn--go" href="/settings#listen">Set up Spotify</a></div>` : '';
+    : !s.connected ? `<div class="mu__banner">${ico('wave')}<span>Connect Spotify to save playlists to your account and control playback. Designing and previewing works already.</span><a class="btn btn--go" href="/settings#listen">Set up Spotify</a></div>`
+    : s.resting ? `<div class="mu__banner">${ico('history')}<span>${esc(s.resting)}. Until then Citadel doesn’t contact Spotify at all, so playback controls and saving playlists wait too.</span></div>` : '';
 }
 
 // ---- panels -------------------------------------------------------------------------------------------------------------
@@ -274,7 +275,7 @@ function trackHtml(t, i) {
       ${missing ? `<button class="btn" type="button" data-mu-find="${i}">Find…</button>` : `<button class="btn btn--icon" type="button" data-mu-playtrk="${i}" title="Play from here">${ico('play')}</button>`}
       <button class="btn btn--icon${t.locked ? ' is-on' : ''}" type="button" data-mu-trk="${t.locked ? 'unlock' : 'lock'}" data-pos="${i}" title="${t.locked ? 'Unlock' : 'Lock — keep it through rebuilds'}">${ico('lock')}</button>
       <button class="btn btn--icon btn--stop" type="button" data-mu-trk="remove" data-pos="${i}" title="Remove — and leave it out of this playlist from now on">${ico('x')}</button></span></div>
-    ${cands[i] ? `<div class="cands">${cands[i] === 'loading' ? '<span class="spin"></span>' : cands[i].length ? cands[i].map((c, j) => `<button type="button" class="cand" data-mu-pick="${i}:${j}">${ico('check')}${esc(c.name)} · ${esc(c.artist)}<span class="mono">${esc(c.album)}${c.year ? ` · ${esc(c.year)}` : ''}</span></button>`).join('') : '<span class="note-line">Nothing close on Spotify.</span>'}
+    ${cands[i] ? `<div class="cands">${cands[i] === 'loading' ? '<span class="spin"></span>' : cands[i].length ? `<span class="cands__from">Results from ${spotifyMark('', 'cands__sp')}</span>` + cands[i].map((c, j) => `<button type="button" class="cand" data-mu-pick="${i}:${j}">${ico('check')}${esc(c.name)} · ${esc(c.artist)}<span class="mono">${esc(c.album)}${c.year ? ` · ${esc(c.year)}` : ''}</span></button>`).join('') : '<span class="note-line">Nothing close on Spotify.</span>'}
       <button type="button" class="cand" data-mu-trk="remove" data-pos="${i}">${ico('x')}Leave it out</button></div>` : ''}`;
 }
 
@@ -349,27 +350,41 @@ async function loadDiscover() {
 function discoverHtml() {
   const d = disc.data;
   const bases = d?.bases || { '12m': 'your last 12 months' };
-  const head = `<div class="dtool">${[['all', 'All'], ['never', 'Never played'], ['barely', 'Barely tried']].map(([v, l]) => `<button class="fchip" type="button" data-mu-dfilter="${v}" aria-pressed="${disc.filter === v}">${l}</button>`).join('')}
-    <span class="grow"><span class="meta">${d?.running ? '<span class="spin"></span> finding artists — a minute or two' : d?.result ? `worked out ${whenRel(d.result.built_at)}` : ''}</span>
+  const head = `<div class="dtool">${[['all', 'All'], ['never', 'Never played'], ['barely', 'Barely tried'], ['vibe', 'By vibe']].map(([v, l]) => `<button class="fchip" type="button" data-mu-dfilter="${v}" aria-pressed="${disc.filter === v}">${l}</button>`).join('')}
+    <span class="grow"><span class="meta">${d?.running ? '<span class="spin"></span> finding artists — slowly, to go easy on Spotify' : d?.result ? `worked out ${whenRel(d.result.built_at)} · redone overnight each week` : ''}</span>
       <select class="fld" data-mu-basis aria-label="Based on">${opt(Object.entries(bases).map(([k, v]) => [k, `Based on: ${v}`]), disc.basis)}</select>
       <button class="btn" type="button" data-mu-drefresh${d?.running ? ' disabled' : ''}>${ico('refresh')}Refresh</button></span></div>`;
   if (!d) return head + '<div class="mu-empty"><span class="spin"></span></div>';
   const errs = d.result?.errors?.length ? `<p class="err-line">${esc(d.result.errors.join(' · '))}</p>` : '';
+  const empty = what => `<div class="mu-empty">${ico('spark')}<b>${d.running ? 'Finding artists…' : d.result ? what : 'Not worked out yet'}</b>${d.running ? 'This takes a few minutes the first time.' : d.result ? 'Try a different basis, or Refresh.' : ''}</div>`;
+  if (disc.filter === 'vibe') {
+    const vibes = d.result?.vibes || [];
+    if (!vibes.length) return head + errs + empty('No vibes to show');
+    const jump = `<div class="vjump">${vibes.map(v => `<button class="fchip" type="button" data-mu-vjump="${esc(v.id)}">${esc(v.name)}</button>`).join('')}</div>`;
+    const more = v => v.seeds.length > 4 ? ` +${v.seeds.length - 4} more` : '';
+    return head + errs + jump + vibes.map(v => `<section class="vibe" id="mu-vibe-${esc(v.id)}">
+      <div class="dhead"><h2>${esc(v.name)}</h2><p>your connection: ${esc(v.seeds.slice(0, 4).join(', '))}${more(v)} · ${plays(v.plays)}</p></div>
+      <div class="dgrid">${v.artists.map(discTile).join('')}</div></section>`).join('');
+  }
   const list = (d.result?.artists || []).filter(a => disc.filter === 'all' || (disc.filter === 'never' ? !a.plays : a.plays > 0));
+  return head + errs + (list.length ? `<div class="dgrid">${list.map(discTile).join('')}</div>` : empty('Nothing to suggest'));
+}
+
+function discTile(a) {
   const tcase = s => s.replace(/(^|[\s-])(\p{L})/gu, (m, sp, c) => sp + c.toUpperCase());      // "melodic death metal" -> "Melodic Death Metal"
   const dopt = (icon, label, sub, what, extra = '') => `<div class="dc__opt"><span class="dc__what">${ico(icon)}<span>${sub ? `<small>${sub}</small>` : ''}${esc(label)}</span></span>
       <span class="dc__btns"><button class="btn btn--go" type="button" data-mu-dplay="${what}"${extra} title="Play now">${ico('play')}<span class="bl">Play</span></button>
       <button class="btn" type="button" data-mu-dqueue="${what}"${extra} title="Add to the end of what’s playing">${ico('plus')}<span class="bl">Queue</span></button></span></div>`;
-  const cards = list.length ? `<div class="dgrid">${list.map(a => `<article class="card dc" data-mu-artist="${esc(a.artist)}"><div class="card__in">
+  const match = a.match == null ? 'band connection'
+    : `<span class="match__bar"><i style="width:${a.match}%"></i></span><span title="How closely Last.fm’s listeners link them to the artist of yours they’re most like">${a.match}% match</span>`;
+  return `<article class="card dc" data-mu-artist="${esc(a.artist)}"><div class="card__in">
       <div class="dc__top">${art(a.artist, '')}<div><div class="dc__name">${esc(a.artist)}</div>
-        <div class="match"><span class="match__bar"><i style="width:${a.match}%"></i></span>${a.match}% match · ${a.plays ? plays(a.plays) : 'never played'}</div></div>
+        <div class="match">${match} · ${a.plays ? plays(a.plays) : 'never played'}</div></div>
         <button class="btn btn--icon btn--stop dc__nope" type="button" data-mu-nope title="Not for me — don’t suggest them again">${ico('x')}</button></div>
       ${(a.tags || []).length ? `<div class="dc__tags">${a.tags.map(t => `<span class="gbub">${esc(tcase(t))}</span>`).join('')}</div>` : ''}
       <div class="reasons">${a.reasons.filter(r => r.src !== 'you').map(r => `<div class="reason"><span class="src src--${r.src}">${{ lfm: 'last.fm', mb: 'musicbrainz' }[r.src] || r.src}</span><span>${esc(r.text)}</span></div>`).join('')}</div>
-      <div class="dc__opts">${dopt('list', 'Top 10 songs', '', 'top')}${a.album ? dopt('disc', a.album, 'Biggest album', 'album', ` data-album="${esc(a.album)}"`) : ''}</div>
-    </div></article>`).join('')}</div>`
-    : `<div class="mu-empty">${ico('spark')}<b>${d.running ? 'Finding artists…' : d.result ? 'Nothing to suggest' : 'Not worked out yet'}</b>${d.running ? 'This takes a minute or two the first time.' : d.result ? 'Try a different basis, or Refresh.' : ''}</div>`;
-  return head + errs + cards;
+      ${a.album ? `<div class="dc__opts">${dopt('disc', a.album, 'Album', 'album', ` data-album="${esc(a.album)}" data-uri="${esc(a.album_uri || '')}"`)}</div>` : ''}
+    </div></article>`;
 }
 
 // ---- Rediscover: artists you played far more than you do now ------------------------------------------------------------
@@ -458,7 +473,7 @@ function gigsHtml() {
 }
 
 // ---- Releases / Vinyl: Home's own rows, with room, plus Listen ---------------------------------------------------------------
-const listenBtn = (it, kind, label) => `<button class="btn" type="button" data-mu-listen="${kind}" data-artist="${esc(it.artist || '')}" data-title="${esc(it.title)}" title="${kind === 'album' ? 'Play the album on Spotify' : 'Not out yet — plays their best-known songs'}">${ico('play')}<span class="bl">${label}</span></button>`;
+const listenBtn = (it, kind, label) => `<button class="btn" type="button" data-mu-listen="${kind}" data-artist="${esc(it.artist || '')}" data-title="${esc(it.title)}" title="${kind === 'album' ? 'Play the album on Spotify' : 'Not out yet — plays their biggest album'}">${ico('play')}<span class="bl">${label}</span></button>`;
 const isOut = it => !it.date || it.date <= (dash?.now || '').slice(0, 10);
 
 function chips(list, current, attr) {
@@ -476,7 +491,7 @@ function releasesHtml() {
     <div class="maxbar">${chips([['all', 'All'], ['new', 'New'], ['pinned', 'Pinned'], ['upcoming', 'Upcoming'], ['out', 'Out now'], ['dismissed', 'Dismissed']], rel.filter, 'data-mu-rfilter')}
       <button class="fchip fchip--action" type="button" data-mark-seen="release">Mark all seen</button><input class="fld mu-search" type="search" placeholder="Filter…" value="${esc(rel.search)}" data-mu-rsearch aria-label="Filter"></div>
     <ul class="rows">${rows || `<li class="mu-empty">Nothing matches.</li>`}</ul>
-    <div class="fullnote">The same releases as Home’s card — pins and dismissals are shared. Listen plays the album on Spotify; before release day it plays the artist’s best-known songs.</div></div></section>`;
+    <div class="fullnote">The same releases as Home’s card — pins and dismissals are shared. Listen plays the album on Spotify; before release day it plays the artist’s biggest album.</div></div></section>`;
 }
 
 function vinylHtml() {
@@ -495,7 +510,7 @@ function vinylHtml() {
   return `<section class="card mcard mu-full" id="mu-vinyl"><div class="card__in"><div class="mh"><span class="hud">${vin.mode === 'pre' ? 'Confirmed pre-orders' : 'Vinyl radar'}</span><span class="meta">${vin.mode === 'pre' ? `${(d.preorders || []).length} confirmed` : `${d.total} pre-orders · ${d.stores} stores`}</span></div>
     <div class="maxbar"><span class="seg" role="group"><button type="button" data-mu-vmode="radar" aria-pressed="${vin.mode === 'radar'}">Vinyl radar</button><button type="button" data-mu-vmode="pre" aria-pressed="${vin.mode === 'pre'}">Confirmed pre-orders</button></span>${bar2}</div>
     <ul class="rows">${body}</ul>
-    <div class="fullnote">The same records as Home’s Vinyl radar — purchases, pins and dismissals are shared. “Listen first” plays the album, or before release day the artist’s best-known songs.</div></div></section>`;
+    <div class="fullnote">The same records as Home’s Vinyl radar — purchases, pins and dismissals are shared. “Listen first” plays the album, or before release day the artist’s biggest album.</div></div></section>`;
 }
 
 // ---- Worth buying: albums you play a lot but don't own, from the Discogs marketplace (app/music/buying.py) ----------------
@@ -573,9 +588,22 @@ function buyingHtml() {
 }
 
 // ---- the player bar --------------------------------------------------------------------------------------------------------
+// Spotify is asked only as often as the bar needs. Its clock ticks here, so while a track plays the next look is just after
+// it ends — or in 30 s, to notice a skip or pause made elsewhere; paused, every 30 s; nothing playing, every minute. A button
+// pressed here looks straight away, and nothing is asked while the page is hidden or another page is showing.
+let restingShown = false, pollTimer = null;
+function nextPoll() {
+  if (!pl?.ready || pl.resting_until || !pl.active) return 60000;
+  if (!pl.playing) return 30000;
+  return Math.max(1500, Math.min(30000, pl.track.duration - pl.progress + 1500));
+}
 async function pollPlayer() {
+  clearTimeout(pollTimer);
   if (!started) return;
   try { pl = await api.get(`${API}/player`); plAt = Date.now(); } catch { /* keep the last reading */ }
+  clearTimeout(pollTimer);
+  if (active && !document.hidden) pollTimer = setTimeout(pollPlayer, nextPoll());
+  if (!!pl?.resting_until !== restingShown) { restingShown = !!pl?.resting_until; loadOverview(); }   // Spotify's pause began or ended
   renderBar();
   if (bar === 'hidden') renderTop();
 }
@@ -603,16 +631,17 @@ function renderBar() {
   if (!pl.ready || !pl.active) {
     el.classList.add('mu-bar--msg');
     const msg = !pl.ready ? `<span><b>${esc(pl.why || 'Spotify isn’t connected')}.</b> Set it up in Settings → Music page.</span>`
+      : pl.resting_until ? `<span>${esc(pl.error)}.</span>`
       : pl.error ? `<span><b>Spotify:</b> ${esc(pl.error)}</span>` : '<span><b>Nothing playing.</b> Start something here, or open Spotify on this PC.</span>';
     el.innerHTML = `<div class="off">${ico('desk')}${msg}</div><div class="acts">${!pl.ready ? '<a class="btn btn--go" href="/settings#listen">Settings</a>'
-      : `<span class="dev"><button class="btn dev__btn" type="button" data-mu-devices>${ico('phone')}<span>Devices</span></button>${devMenuHtml()}</span><button class="btn btn--solid" type="button" data-mu-open>${ico('play')}Open Spotify</button>`}${sizer()}</div>`;
+      : pl.resting_until ? '' : `<span class="dev"><button class="btn dev__btn" type="button" data-mu-devices>${ico('phone')}<span>Devices</span></button>${devMenuHtml()}</span><button class="btn btn--solid" type="button" data-mu-open>${ico('play')}Open Spotify</button>`}${sizer()}</div>`;
     return;
   }
   const t = pl.track, pos = Math.min(t.duration, pl.progress + (pl.playing ? Date.now() - plAt : 0));
   el.style.setProperty('--p', `${t.duration ? pos / t.duration * 100 : 0}%`);
-  el.innerHTML = `<div class="np">${art(t.artists[0] || t.name, t.image)}<div class="np__main"><div class="np__t">${t.url ? `<a href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener">${esc(t.name)}</a>` : esc(t.name)}</div>
-      <div class="np__a">${esc(t.artists.join(', '))}${t.album ? ` · ${esc(t.album)}` : ''}</div>${pl.fact ? `<div class="np__fact">${esc(pl.fact)}</div>` : ''}</div>
-      <button class="btn btn--icon${pl.liked ? ' is-on' : ''}" type="button" data-mu-cmd="like" data-value="${!pl.liked}" title="${pl.liked ? 'Remove from' : 'Save to'} your library">${ico('heart')}</button></div>
+  el.innerHTML = `<div class="np">${art(t.artists[0] || t.name, t.image, t.image ? 'art--sp' : '')}<div class="np__main"><div class="np__t">${t.url ? `<a href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener">${esc(t.name)}</a>` : esc(t.name)}</div>
+      <div class="np__a">${esc(t.artists.join(', '))}${t.album ? ` · ${esc(t.album)}` : ''}</div>${pl.fact ? `<div class="np__fact">${esc(pl.fact)}</div>` : ''}${spotifyMark(t.url)}</div>
+      <button class="btn btn--icon${pl.liked ? ' is-on' : ''}" type="button" data-mu-cmd="like" data-value="${!pl.liked}" title="${pl.liked ? 'Remove from' : 'Save to'} your library">${ico('heart')}</button>${spotifyMark(t.url, 'side__sp')}</div>
     <div class="ctl"><div class="ctl__b">
       <button class="btn btn--icon${pl.shuffle ? ' is-on' : ''}" type="button" data-mu-cmd="shuffle" data-value="${!pl.shuffle}" title="Shuffle">${ico('shuffle')}</button>
       <button class="btn btn--icon" type="button" data-mu-cmd="previous" title="Previous">${ico('prev')}</button>
@@ -622,6 +651,12 @@ function renderBar() {
       <div class="prog"><span data-mu-pos>${mmss(pos)}</span><span class="prog__bar" data-mu-seek><i style="width:${t.duration ? pos / t.duration * 100 : 0}%"></i></span><span>${mmss(t.duration)}</span></div></div>
     <div class="side"><span class="dev"><button class="btn dev__btn is-live" type="button" data-mu-devices title="Playing on ${esc(pl.device.name)}">${ico(pl.device.type === 'Smartphone' ? 'phone' : 'desk')}<span>${esc(pl.device.name)}</span></button>${devMenuHtml()}</span>
       ${pl.device.volume != null ? `${ico('vol')}<input class="vol" type="range" min="0" max="100" value="${pl.device.volume}" data-mu-vol aria-label="Volume">` : ''}${sizer()}</div>`;
+}
+
+/** Spotify's logo beside anything that came from Spotify (its terms ask for that), linking to it there when there's a link. */
+function spotifyMark(url, cls = 'np__sp') {
+  const img = '<img class="sp-logo sp-logo--white" src="/static/img/spotify-logo-white.svg" alt="Spotify"><img class="sp-logo sp-logo--black" src="/static/img/spotify-logo-black.svg" alt="Spotify">';
+  return url ? `<a class="${cls}" href="${esc(safeUrl(url))}" target="_blank" rel="noopener" title="Open on Spotify">${img}</a>` : `<span class="${cls}">${img}</span>`;
 }
 
 function devMenuHtml() {
@@ -699,13 +734,13 @@ root.addEventListener('click', async e => {
   if ('muPlaypl' in d) { playWhat({ kind: 'playlist', playlist_id: cur.id }, cur.name); return; }
   if (d.muOpenpl) { tab = 'playlists'; store.set('mu-tab', tab); await loadPlaylist(Number(d.muOpenpl), false); renderPanel(); return; }
   // discover
-  if (d.muDfilter) { disc.filter = d.muDfilter; $('#mu-panel').innerHTML = discoverHtml(); return; }
+  if (d.muDfilter) { disc.filter = d.muDfilter; store.set('mu-dfilter', disc.filter); $('#mu-panel').innerHTML = discoverHtml(); return; }
+  if (d.muVjump) { document.getElementById(`mu-vibe-${d.muVjump}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   if ('muDrefresh' in d) { await call(() => api.post(`${API}/discover/refresh?basis=${encodeURIComponent(disc.basis)}`)); await loadDiscover(); return; }
   const artistCard = b.closest('[data-mu-artist]');
-  if ((d.muDplay || d.muDqueue) && artistCard) {         // a Discover tile: their top 10, or their biggest album
-    const artist = artistCard.dataset.muArtist, what = d.muDplay || d.muDqueue;
-    const body = what === 'album' ? { kind: 'album', artist, title: d.album } : { kind: 'artist', artist };
-    const label = what === 'album' ? d.album : `${artist}’s top 10`;
+  if ((d.muDplay || d.muDqueue) && artistCard) {         // a Discover tile: their album (found when Discover was worked out)
+    const artist = artistCard.dataset.muArtist;
+    const body = { kind: 'album', artist, title: d.album || '', uri: d.uri || '' }, label = d.album || artist;
     if (d.muDplay) { playWhat(body, label); return; }
     busy(b, true);
     const r = await call(() => api.post(`${API}/queue`, body));

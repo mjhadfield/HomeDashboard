@@ -1,5 +1,5 @@
-"""Rebuilds rotating playlists on their schedule, turns a pre-gig playlist into the real setlist after the show, and
-keeps Discover fresh. One instance per app run, on app.state (started and stopped in main.py's lifespan), like Monitor.
+"""Rebuilds rotating playlists on their schedule and turns a pre-gig playlist into the real setlist after the show,
+asking Spotify at its background pace (and not at all while Spotify has asked Citadel to wait). One instance per app run, on app.state (started and stopped in main.py's lifespan), like Monitor.
 
 What's due is worked out from each playlist's own last save, so a restart neither repeats a rotation nor skips one —
 one missed while Citadel was off simply happens when it's back."""
@@ -52,9 +52,13 @@ class Rotator:
 
     async def tick(self, now: float | None = None) -> list[str]:
         self.last_check = now or time.time()
+        if not sp.service.ready() or sp.resting_until():
+            return []
+        with sp.background():
+            return await self._tick(now)
+
+    async def _tick(self, now: float | None) -> list[str]:
         done = []
-        if not sp.service.ready():
-            return done
         for pl in playlists.all_playlists():
             if pl["mode"] == "rot" and pl["meta"].get("gig") and self.last_check - self._looked.get(pl["id"], 0) >= SETLIST_EVERY:
                 if pl["meta"]["gig"].get("date", "9999") < time.strftime("%Y-%m-%d"):
@@ -77,8 +81,6 @@ class Rotator:
             except Exception as e:               # tried again after BACKOFF; a broken one is visible on the page and in the log
                 self._failed[pl["id"]] = self.last_check
                 log.warning("Music: couldn’t rotate %s: %s", pl["name"], e)
-        if discover.cached("12m") is None and not discover.running("12m"):
-            discover.refresh("12m")
         if done:
             store.changed("playlists")
         return done

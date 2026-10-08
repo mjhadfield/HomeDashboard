@@ -37,11 +37,13 @@ bottom) never disappears, switching pages never reloads the browser tab:
   in an iframe that's created once and never reloaded — switching away and back keeps whatever was
   playing/browsing exactly where you left it.
 - **Companion** / **SQL DB** — Music Companion and its database explorer, embedded the same way.
+- **Odysseus** — the Odysseus AI workspace (`~/Projects/Odysseus`, port 7011), embedded the same way, from whichever
+  link is marked **Use as Odysseus view**.
 - **Music** — Spotify playlists built from your own listening, Discover, gig setlists, and full-page Releases and
   Vinyl radar. See [The Music page](#the-music-page).
 
 Settings is still its own separate page (the gear icon) — everything else routes client-side via the URL hash
-(`#home` / `#news` / `#media` / `#music` / `#sql` / `#listen`), so the back/forward buttons and reload both work normally.
+(`#home` / `#news` / `#media` / `#music` / `#sql` / `#listen` / `#ai`), so the back/forward buttons and reload both work normally.
 
 ## Who sees what
 
@@ -212,14 +214,19 @@ account, plus a player bar that steers Spotify wherever it's playing — the des
   **Fixed** playlists change only when rebuilt; **rotating** ones are rebuilt on schedule into the *same* Spotify
   playlist (so its link and followers stay). Lock a track to keep it through rebuilds; remove one and that playlist
   leaves it out for good. Songs Spotify can't match are listed with a **Find…** to pick by hand (remembered).
-- **Discover** — artists you've never (or barely) played, ranked by Last.fm similarity and MusicBrainz shared members,
-  weighted by how much you play the artists they connect to; **Follow** adds them to Releases / Vinyl radar / Gig
-  radar. **Rediscover** lists artists you've drifted from, with a one-click mix.
+- **Discover** — artists you've never (or barely) played, drawn from your top 100 by Last.fm similarity and MusicBrainz
+  shared members, weighted by how much you play the artists they connect to and spread so no one vibe or artist fills
+  the list, with your artists' solo careers and side projects left out (MusicBrainz memberships); "% match" is
+  Last.fm's own similarity to the artist of yours they're closest to. **By vibe** groups five
+  new artists under each style your top 100 spans (Reggae & Ska, Drum & Bass, Desert & Stoner Rock…), the ones you
+  play least first. **Rediscover** lists artists you've drifted from, with a one-click mix. A result is kept until a
+  newer one replaces it (a restart or an update never throws one away); the *Discover* job redoes stale ones (a week
+  old, cut short, or from older code) at 03:00, one at a time, and **Refresh** queues one by hand at the same pace.
 - **Gigs** — a predicted setlist for each booked gig (from the band's last ten shows on Setlist.fm), a **pre-gig
   playlist** that refreshes daily and switches to the real setlist after the show, playlists of shows you were at, and
   any setlist.fm link → playlist (what Setlist → Spotify did).
-- **Releases / Vinyl** — Home's cards given the whole page, with **Listen** (plays the album, or before release day the
-  artist's best-known songs). Pins, dismissals and purchases are shared with Home.
+- **Releases / Vinyl** — Home's cards given the whole page, with **Listen** (plays the album, or before release day their
+  biggest album). Pins, dismissals and purchases are shared with Home.
 
 The player bar has three sizes (full, slim, hidden into a chip in the page header); on the fixed 1080p/1440p layout
 it has its own row and never covers anything.
@@ -232,6 +239,25 @@ lasts six months whatever happens, so Citadel warns two weeks ahead. Last.fm and
 Spotify's 2026 rules for personal apps decided several things here: no recommendations / related artists / audio
 features / artist top tracks (Last.fm and MusicBrainz stand in), search returns at most 10 results (one song at a time,
 remembered), playlists are made with `POST /me/playlists` and filled via `/playlists/{id}/items`.
+
+**Staying within Spotify's limits** (its [rate-limit guidance](https://developer.spotify.com/documentation/web-api/concepts/rate-limits)
+and Developer Terms). Spotify counts each app's calls over a rolling 30 seconds and doesn't publish the limit; a
+personal app's is low (a Discover rebuild at ~2 searches a second earned a 19-hour ban on 2026-10-07). So:
+- **One pacer** (`app/music/services/spotify.py`): at most 15 calls in any 30 s, of which background work (Discover,
+  playlist matching, rotations) gets 5, one every 6 s, and only while the page has room to spare.
+- **Back-off**: a 429 (or 503) is never retried. Citadel waits as long as `Retry-After` says — or 1 min, doubling with
+  each refusal in a row up to a day, whichever is longer — and sends *nothing* to Spotify until then, restarts
+  included. The page says when it'll pick up again.
+- **Lazy, not polled**: the player is asked just after the current track ends (or every 30 s, to notice a change
+  made elsewhere), every 30 s when paused, every minute when nothing's playing, and never while the page is hidden;
+  its clock ticks locally. Answers are shared between open pages for 4 s.
+- **Albums, not top 10s**: Discover finds each artist's album (Last.fm's biggest, else Spotify's first) with one
+  search, kept for a month, and Play/Queue reuse it without searching again. Spotify's batch endpoints (Get Several
+  Albums/Tracks/Artists) and artists' top tracks were removed for personal apps in February 2026, so one search per
+  artist is the floor. Queue is the costliest button (Spotify queues one track per call), so it only ever runs when pressed.
+- **Least privilege**: only the scopes in use are requested (they apply from the next Connect).
+- **Attribution**: Spotify's full logo (white on dark themes, black on light, ≥70 px) sits beside its content in the
+  player bar and the Find… results, linking to the track on Spotify; its artwork is shown uncropped with 4 px corners.
 
 **Adding a service**: one module in `app/music/services/` (a `Service` with its fields and a `test()`), usually plus an
 ingredient in `app/music/ingredients.py` that uses it. Settings lists it by itself.
@@ -292,12 +318,38 @@ deploy/install.sh                    # update deps / units after pulling changes
 deploy/uninstall.sh                  # remove service + `hub` (keeps data/ and .env)
 ```
 
+## Remote access (Tailscale)
+
+Nothing is exposed to the internet. Away from home, devices reach the LAN over Tailscale: the host is a **subnet
+router** for `192.168.0.0/24`, so every LAN address (Citadel, the Music Database servers, Jellyfin on `.70`) works
+unchanged — same URLs, same CSP, same enrolled-device cookies.
+
+Host setup (once, needs sudo):
+
+```bash
+sudo pacman -S tailscale
+echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-tailscale.conf && sudo sysctl --system
+sudo systemctl enable --now tailscaled
+sudo ufw allow in on tailscale0 comment 'Tailscale: my own devices'
+sudo ufw route allow in on tailscale0 to 192.168.0.0/24 comment 'Tailscale subnet route to LAN'
+sudo tailscale up --advertise-routes=192.168.0.0/24 --operator="$USER"
+```
+
+Then in the admin console (login.tailscale.com/admin/machines), on the host: **Edit route settings** → approve
+`192.168.0.0/24`, and **Disable key expiry** (otherwise it drops off after ~180 days).
+
+Clients: install Tailscale and sign in with the same account. Linux clients need `sudo tailscale up --accept-routes`;
+Windows, macOS, iOS and Android accept the route automatically. A device still needs `hub enrol` to be an owner —
+being on the tailnet only makes it a LAN visitor. If a remote network also uses `192.168.0.x`, LAN addresses clash;
+use a phone hotspot instead.
+
 ## Moving to another PC
 
 1. Copy the folder (including `data/hub.sqlite` and `.env`) — or run `git clone` and copy those two.
 2. Set `HUB_PROJECTS_DIR` in `.env` if the projects live somewhere else, and check each project's paths in the app.
 3. `deploy/install.sh`, then the two `sudo` lines above. Devices you enrolled keep working (the cookie key is
    in `data/secret.key`; copy it too, otherwise re-run `hub enrol`).
+4. Redo the Tailscale host setup above on the new PC (and remove the old one in the admin console).
 
 ## Development
 

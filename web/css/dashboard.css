@@ -40,6 +40,8 @@
 #view-music.is-active { height: min(70vh, 560px); }
 #view-sql { position: relative; }
 #view-sql.is-active { height: min(70vh, 560px); }
+#view-ai { position: relative; }
+#view-ai.is-active { height: min(70vh, 560px); }
 /* Same chamfered, hairline-gradient-border shell as .card (components.css) — an iframe can't carry
    ::before/::after itself, so the shell is a real wrapper element around it instead. This only reaches
    the iframe's own border/frame; whatever renders *inside* it (Jellyfin's or Companion's own UI, incl.
@@ -53,6 +55,21 @@
 }
 .frame-shell iframe { flex: 1; width: 100%; height: 100%; border: 0; background: var(--surface); }
 html.has-bg .frame-shell iframe { background: transparent; }    /* a custom theme's picture shows through the embedded page */
+/* Phones: the min(70vh, 560px) above left a tall phone's embedded page stopping well short of the tab bar (236px of
+   dead space on a 412x915 screen). While one of these pages is showing, .main is pinned to the screen with
+   position: fixed, ending where the tab bar starts, and the page fills it. Sizing from 100dvh instead didn't hold on
+   Android: Brave's bottom toolbar and the on-screen keyboard don't shrink dvh, but they do move fixed elements like the
+   tab bar, so the frame ran underneath it. Pinned to the same edges as the tab bar, the two always line up. The tab bar
+   is 63px plus the bottom safe area. The keyboard half of this is app.js's interactive-widget switch (see route()),
+   which makes the keyboard shrink the screen fixed elements are pinned to, rather than slide over it. Scoped with
+   :has() so Home, News and Music keep their normal scrolling page. */
+@media (max-width: 760px) {
+  .main:has(> .view.is-active > .frame-shell) {
+    position: fixed; inset: 0 0 calc(63px + env(safe-area-inset-bottom)) 0;
+    display: flex; flex-direction: column; padding: 14px 16px 16px;
+  }
+  #view-media.is-active, #view-music.is-active, #view-sql.is-active, #view-ai.is-active { flex: 1; height: auto; min-height: 0; }
+}
 
 .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .top__brand { display: flex; align-items: baseline; gap: 14px; }
@@ -337,6 +354,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
   #view-media.is-active { height: auto; }
   #view-music.is-active { height: auto; }
   #view-sql.is-active { height: auto; }
+  #view-ai.is-active { height: auto; }
   .grid {
     min-height: 0; grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, .95fr);
     grid-template-areas:

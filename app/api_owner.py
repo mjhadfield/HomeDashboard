@@ -89,7 +89,8 @@ async def project_logs(slug: str, n: int = 200):
 def _link_cfg(r: sqlite3.Row) -> dict[str, Any]:
     return {"id": r["id"], "name": r["name"], "subtitle": r["subtitle"], "url": r["url"], "icon": r["icon"],
             "health_url": r["health_url"] or "", "is_primary": bool(r["is_primary"]), "show_guest": bool(r["show_guest"]), "tier": r["tier"],
-            "pinned": r["pin_order"] is not None, "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"])}
+            "pinned": r["pin_order"] is not None, "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"]),
+            "for_ai": bool(r["for_ai"])}
 
 
 def _project_cfg(r: sqlite3.Row) -> dict[str, Any]:
@@ -194,6 +195,16 @@ def _apply_for_sql(con: sqlite3.Connection, link_id: Any, for_sql: bool) -> None
     con.execute("UPDATE projects SET for_sql = 0")
 
 
+def _apply_for_ai(con: sqlite3.Connection, link_id: Any, for_ai: bool) -> None:
+    """Same idea as _apply_for_media, for the Odysseus page's iframe — a separate column, so setting one
+    never touches the others. Link-only, like Media: Odysseus runs under Docker, not as a Citadel project."""
+    if not for_ai:
+        con.execute("UPDATE links SET for_ai = 0 WHERE id = ?", (link_id,))
+        return
+    con.execute("UPDATE links SET for_ai = 0 WHERE id != ?", (link_id,))
+    con.execute("UPDATE links SET for_ai = 1 WHERE id = ?", (link_id,))
+
+
 def _apply_page(con: sqlite3.Connection, slug: str, column: str, on: bool | None) -> None:
     """A project as the Companion (for_music) or SQL DB (for_sql) page's source. One source per page across links
     and projects together, so choosing a project here takes the job from whichever link or project had it."""
@@ -217,6 +228,7 @@ async def create_link(body: schemas.LinkIn, request: Request):
         _apply_for_media(con, cur.lastrowid, body.for_media)
         _apply_for_music(con, cur.lastrowid, body.for_music)
         _apply_for_sql(con, cur.lastrowid, body.for_sql)
+        _apply_for_ai(con, cur.lastrowid, body.for_ai)
     notify.config()
     asyncio.create_task(request.app.state.health.sweep_now())
     return {"id": cur.lastrowid}
@@ -239,6 +251,7 @@ async def update_link(link_id: int, body: schemas.LinkIn, request: Request):
             _apply_for_media(con, link_id, body.for_media)
             _apply_for_music(con, link_id, body.for_music)
             _apply_for_sql(con, link_id, body.for_sql)
+            _apply_for_ai(con, link_id, body.for_ai)
     if not n:
         raise HTTPException(404, "no such link")
     notify.config()

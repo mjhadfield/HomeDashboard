@@ -97,6 +97,7 @@ def links_state(health: Health, guest_only: bool = False) -> list[dict[str, Any]
             "id": r["id"], "name": r["name"], "subtitle": r["subtitle"], "url": r["url"], "icon": r["icon"],
             "primary": bool(r["is_primary"]), "tier": r["tier"], "pinned": r["pin_order"] is not None, "pin_order": r["pin_order"],
             "for_media": bool(r["for_media"]), "for_music": bool(r["for_music"]), "for_sql": bool(r["for_sql"]),
+            "for_ai": bool(r["for_ai"]),
             "up": (h["ok"] if h else None),   # None = no health check configured / not probed yet
         })
     return out

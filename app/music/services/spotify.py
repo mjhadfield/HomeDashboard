@@ -11,15 +11,27 @@ login lasts six months from when it was granted, however often it's refreshed, t
 two weeks ahead); recommendations, related artists, audio features and artists' top tracks aren't available (Last.fm
 and MusicBrainz stand in); search returns at most 10 results; playlists are created with POST /me/playlists and
 filled through /playlists/{id}/items; Liked Songs are saved through /me/library.
+
+Rate limits. Spotify allows each app some number of calls in a rolling 30-second window. It doesn't publish the number,
+and a personal app's is low: on 2026-10-07 a Discover rebuild making about two searches a second earned Citadel a
+19-hour ban. So every call goes through one Pacer, which keeps everything together to BUDGET calls a window, and
+background work (Discover, playlist matching, rotations) to a trickle of its own. That leaves room for the player and
+its buttons. A refusal (429) is never retried: its Retry-After is written down, and nothing at all is sent to
+Spotify until that time has passed, restarts included.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
+import contextvars
 import hashlib
+import logging
 import secrets
 import time
 import urllib.parse
+from collections import deque
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -30,11 +42,21 @@ from .base import Field, Service, ServiceError
 
 ACCOUNTS = "https://accounts.spotify.com"
 API = "https://api.spotify.com/v1"
-SCOPES = ("playlist-modify-public playlist-modify-private playlist-read-private user-read-playback-state "
-          "user-modify-playback-state user-read-currently-playing user-library-read user-library-modify")
+SCOPES = ("playlist-modify-public playlist-modify-private user-read-playback-state user-modify-playback-state "
+          "user-library-read user-library-modify")          # only what's used (a new set applies from the next Connect)
 LOGIN_LIFETIME = 182 * 86400          # a login lasts six months from when it was granted
 STATE_TTL = 15 * 60
 OAUTH_KEY = "music-spotify-oauth"
+COOLDOWN_KEY = "music-spotify-cooldown"
+WINDOW = 30.0                         # Spotify counts calls over a rolling 30 seconds
+BUDGET = 15                           # calls in any WINDOW, everything together
+BACKGROUND_BUDGET = 5                 # of which background work may use this many...
+BACKGROUND_GAP = 6.0                  # ...spread out, one at least this far apart
+MIN_GAP = 0.2                         # and no two calls of any kind closer than this (a queued top 10 is ten calls)
+DEFAULT_RETRY = 60                    # a 429 without a Retry-After (or a 503) waits this long the first time...
+MAX_REST = 24 * 3600                  # ...doubling with each refusal in a row, up to this; a call that works starts again
+
+log = logging.getLogger("hub.music")
 
 
 def redirect_uri() -> str:
@@ -46,7 +68,9 @@ class SpotifyService(Service):
         a = store.auth()
         connected = bool(a.get("refresh_token")) and not a.get("expired")
         until = (a.get("authorised_at") or 0) + LOGIN_LIFETIME if a.get("authorised_at") else None
+        resting = resting_until()
         return {"redirect_uri": redirect_uri(), "connected": connected, "expired": bool(a.get("expired")),
+                "resting_until": resting, "resting": resting_message(resting) if resting else "",
                 "user": (a.get("user") or {}).get("display_name") or (a.get("user") or {}).get("id") or "",
                 "login_until": until, "days_left": int((until - time.time()) // 86400) if until else None}
 
@@ -115,6 +139,105 @@ def disconnect() -> None:
     store.changed("spotify")
 
 
+# ---- staying within Spotify's limits ------------------------------------------------------------------------------
+
+class Resting(ServiceError):
+    """Spotify asked Citadel to wait, and that time hasn't come yet."""
+
+
+_background = contextvars.ContextVar("spotify_background", default=False)
+
+
+@contextlib.contextmanager
+def background():
+    """Calls made inside (and in tasks started inside) use the background trickle, not the page's share."""
+    token = _background.set(True)
+    try:
+        yield
+    finally:
+        _background.reset(token)
+
+
+def resting_until() -> float | None:
+    """When Spotify said Citadel may call again, if that's still to come."""
+    until = db.get_settings(COOLDOWN_KEY, {}).get("until") or 0
+    return until if until > time.time() else None
+
+
+def _until_text(until: float) -> str:
+    d = datetime.fromtimestamp(until, config.TZ)
+    today = datetime.now(config.TZ).date()
+    day = "" if d.date() == today else " tomorrow" if (d.date() - today).days == 1 else d.strftime(" on %a %d %b")
+    return f"{d:%H:%M}{day}"
+
+
+def resting_message(until: float) -> str:
+    return f"Spotify asked Citadel to pause until {_until_text(until)} — it picks up again by itself then"
+
+
+def _rest(retry_after: str | None) -> float:
+    """Spotify refused a call (429, or 503 busy): wait as long as it says, and longer each time it happens again in a row."""
+    cur = db.get_settings(COOLDOWN_KEY, {})
+    strikes = int(cur.get("strikes") or 0) + 1
+    try:
+        asked = max(1, int(float(retry_after)))
+    except (TypeError, ValueError):
+        asked = 0
+    wait = min(MAX_REST, max(asked, DEFAULT_RETRY * 2 ** (strikes - 1)))
+    until = max(time.time() + wait, cur.get("until") or 0)
+    db.put_settings(COOLDOWN_KEY, {"until": until, "since": time.time(), "retry_after": asked or None, "strikes": strikes})
+    log.warning("Spotify refused a call (%s in a row; Retry-After %s): no Spotify calls until %s", strikes, asked or "none",
+                _until_text(until), extra={"source": "music"})
+    store.changed("spotify")
+    return until
+
+
+def _worked() -> None:
+    """A call got through: the next refusal starts from the first step again."""
+    cur = db.get_settings(COOLDOWN_KEY, {})
+    if cur.get("strikes"):
+        db.put_settings(COOLDOWN_KEY, {**cur, "strikes": 0})
+
+
+class Pacer:
+    """Hands out turns to call Spotify: at most BUDGET in any WINDOW, of which background work gets BACKGROUND_BUDGET,
+    one per BACKGROUND_GAP, and never while the page's share is nearly used up."""
+    def __init__(self) -> None:
+        self._calls: deque[tuple[float, bool]] = deque()
+        self._last = self._last_bg = -1e9
+
+    def _wait(self, bg: bool, now: float) -> float:
+        while self._calls and now - self._calls[0][0] >= WINDOW:
+            self._calls.popleft()
+        waits = [self._last + MIN_GAP - now]
+        limit = BUDGET - (BUDGET - BACKGROUND_BUDGET) // 2 if bg else BUDGET       # background leaves half the rest free
+        if len(self._calls) >= limit:
+            waits.append(self._calls[len(self._calls) - limit][0] + WINDOW - now)
+        if bg:
+            mine = [t for t, b in self._calls if b]
+            waits.append(self._last_bg + BACKGROUND_GAP - now)
+            if len(mine) >= BACKGROUND_BUDGET:
+                waits.append(mine[len(mine) - BACKGROUND_BUDGET] + WINDOW - now)
+        return max(waits)
+
+    async def turn(self, bg: bool | None = None) -> None:
+        bg = _background.get() if bg is None else bg
+        while (wait := self._wait(bg, time.monotonic())) > 0:
+            await asyncio.sleep(wait)
+        now = time.monotonic()
+        self._calls.append((now, bg))
+        self._last = now
+        if bg:
+            self._last_bg = now
+
+    def reset(self) -> None:
+        self._calls.clear()
+        self._last = self._last_bg = -1e9
+
+
+pacer = Pacer()
+
+
 # ---- API client ---------------------------------------------------------------------------------------------------
 
 class Client:
@@ -155,22 +278,24 @@ class Client:
             return tok["access_token"]
 
     async def api(self, method: str, path: str, *, params: dict[str, Any] | None = None, json: Any = None) -> Any:
-        """One Web API call. Returns the decoded body (None for an empty one); raises ServiceError in plain words."""
+        """One Web API call, when the Pacer allows. Returns the decoded body (None for an empty one); raises ServiceError in
+        plain words (Resting while Spotify has asked Citadel to wait)."""
         if not service.enabled():
             raise ServiceError("Spotify is switched off in Settings → Music page")
-        token = await self._token()
-        for attempt in range(3):
+        if until := resting_until():
+            raise Resting(resting_message(until))
+        for attempt in range(2):
+            await pacer.turn()
+            if until := resting_until():                 # checked after the wait too: another call may have been refused meanwhile
+                raise Resting(resting_message(until))
+            token = await self._token(force=attempt > 0)
             r = await self._client().request(method, API + path, params=params, json=json, headers={"Authorization": f"Bearer {token}"})
-            if r.status_code == 401 and attempt == 0:
-                token = await self._token(force=True)
-                continue
-            if r.status_code == 429:
-                wait = float(r.headers.get("Retry-After", "2"))
-                if wait > 15 or attempt == 2:
-                    raise ServiceError("Spotify is rate-limiting Citadel — try again in a minute")
-                await asyncio.sleep(wait)
-                continue
-            break
+            if r.status_code in (429, 503):              # never retried: wait as long as Spotify says, everything included
+                raise Resting(resting_message(_rest(r.headers.get("Retry-After"))))
+            if r.status_code != 401:
+                break
+        if r.status_code < 400:
+            _worked()
         if r.status_code in (202, 204) or not r.content:
             if r.status_code < 300:
                 return None

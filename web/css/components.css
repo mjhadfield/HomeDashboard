@@ -156,10 +156,14 @@
 .cover--d { background: linear-gradient(135deg, #4b5563, #1f1b2e); }
 
 /* ---- One-off top sweep line (page load) --------------------------------- */
+/* The glow travels by background-position inside a line that never moves. It used to be the element itself, by
+   transform, which left it parked a full screen-width past the right edge afterwards. Phone browsers counted that
+   as page width, so the page could be nudged sideways by a few px. A background outside its own box is just
+   clipped, so this never overflows. */
 .sweep { position: fixed; top: 0; left: 0; height: 1px; width: 100%; z-index: 101; pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--accent-hi), transparent);
-  transform: translateX(-100%); animation: sweep 1.6s var(--ease) .2s 1 forwards; }
-@keyframes sweep { to { transform: translateX(100%); } }
+  background: linear-gradient(90deg, transparent, var(--accent-hi), transparent) no-repeat;
+  background-size: 100% 100%; background-position: -100vw 0; animation: sweep 1.6s var(--ease) .2s 1 forwards; }
+@keyframes sweep { to { background-position: 100vw 0; } }
 
 /* mock-only switcher (removed in the real build) */
 .mockbar {
