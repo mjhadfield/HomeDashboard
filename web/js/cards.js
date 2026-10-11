@@ -232,9 +232,11 @@ function system(s) {
 
 // ---- Monitoring ---------------------------------------------------------------------------------------------
 
-const tempClass = t => (t == null ? '' : t >= 85 ? ' mon-stat__val--hot' : t >= 70 ? ' mon-stat__val--warm' : '');
-const monStat = (label, temp) =>
-  `<div class="mon-stat"><span class="mon-stat__label">${esc(label)}</span><span class="mon-stat__val${tempClass(temp)}">${temp != null ? `${temp.toFixed(1)}°` : '—'}</span></div>`;
+const tempClass = t => (t == null ? '' : t >= 85 ? ' mon-temp--hot' : t >= 70 ? ' mon-temp--warm' : '');
+// A column's heading carries its temperature, so the card stays short enough for the 1440p grid even in a browser window.
+const monHead = (label, temp, withTemp = true) =>
+  `<div class="mon-head"><span class="mon-col__label">${esc(label)}</span>${withTemp
+    ? `<span class="mon-temp${tempClass(temp)}" title="${esc(label)} temperature"><small>temp</small>${temp != null ? `${temp.toFixed(1)}°` : '—'}</span>` : ''}</div>`;
 const busiestCore = cores => cores.reduce((max, p) => (p != null && (max == null || p > max) ? p : max), null);
 
 function monitoring(s, ctx) {
@@ -258,16 +260,16 @@ function monitoring(s, ctx) {
       meta: '',
       body: `<div class="mon-split">
         <div class="mon-col">
-          <span class="mon-col__label">CPU</span>
-          ${bar('Usage', '', m.cpu.percent != null ? `${m.cpu.percent}%` : '—', cpuPct, cpuPct >= 85)}
-          ${bar('Busiest core', '', busiest != null ? `${busiest}%` : '—', busiest ?? 0, (busiest ?? 0) >= 85)}
-          ${bar('RAM', '', `${Math.round(memPct)}%`, memPct, memPct >= 85)}
-          ${monStat('CPU temp', cpuTemp)}
+          ${monHead('CPU', cpuTemp)}
+          <div class="mon-bars">
+            ${bar('Usage', '', m.cpu.percent != null ? `${m.cpu.percent}%` : '—', cpuPct, cpuPct >= 85)}
+            ${bar('Busiest core', '', busiest != null ? `${busiest}%` : '—', busiest ?? 0, (busiest ?? 0) >= 85)}
+            ${bar('RAM', '', `${Math.round(memPct)}%`, memPct, memPct >= 85)}
+          </div>
         </div>
         <div class="mon-col">
-          <span class="mon-col__label">GPU</span>
-          ${gpuBars}
-          ${m.gpu ? monStat('GPU temp', gpuTemp) : ''}
+          ${monHead('GPU', gpuTemp, !!m.gpu)}
+          <div class="mon-bars">${gpuBars}</div>
         </div>
       </div>`,
     };

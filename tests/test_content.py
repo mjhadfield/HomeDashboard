@@ -1,5 +1,6 @@
 """Content cards: parsers (against fixtures shaped like the real APIs), curation rules, seeding, and the fetch loops."""
 import asyncio
+import calendar
 import json
 import os
 import sqlite3
@@ -250,27 +251,39 @@ RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Test Metal</ti
 <item><title>Bad link story</title><link>javascript:alert(1)</link><guid>g4</guid><pubDate>Sun, 20 Sep 2026 11:00:00 GMT</pubDate></item>
 <item><title>New vinyl reissue of a classic</title><link>https://ex.com/5</link><guid>g5</guid><pubDate>Sun, 20 Sep 2026 12:00:00 GMT</pubDate></item></channel></rss>"""
 FEED = {"id": "t", "name": "Test Metal"}
+CUTOFF = calendar.timegm((2026, 8, 22, 0, 0, 0))
+
+
+def sections(*feeds, sid="music", keep=3650, **extra):
+    """News settings with one section holding these feeds."""
+    return {"sections": [{"id": sid, "name": sid.title(), "enabled": True, "front": True, "keep_days": keep, "include": [], "exclude": [], "feeds": list(feeds), **extra}]}
 
 
 def test_rss_dates_html_and_links_are_handled():
-    items = news.parse_feed(RSS, FEED, cutoff="2026-08-22", include=[], exclude=[])
-    assert [i["external_id"] for i in items] == ["g1", "g3", "g5"]     # too old + javascript: link dropped
+    items = news.parse_feed(RSS, FEED, cutoff=CUTOFF)
+    assert [i["external_id"] for i in items] == ["ex.com/1", "ex.com/3", "ex.com/5"]     # keyed by address; too old + javascript: link dropped
     assert items[0]["title"] == "Gojira announce huge tour" and items[0]["date"] == "2026-09-19" and items[0]["subtitle"] == "Test Metal"
+    m = items[0]["meta"]
+    assert m["published"] == calendar.timegm((2026, 9, 19, 10, 0, 0)) and m["summary"] == "Tour dates & vinyl" and m["feed"] == "t"
+    assert [i["meta"]["pos"] for i in items] == [0, 2, 4]              # where each sat in the feed (part of the ranking)
+    assert ["w", "gojira"] in m["topics"] and ["w", "tour"] in m["topics"]   # a headline's first word could just be grammar, so it's a word, not a name
 
 
-def test_rss_keyword_rules():
-    inc = news.parse_feed(RSS, FEED, cutoff="2026-08-22", include=["vinyl", "TOUR"], exclude=[])
-    assert [i["external_id"] for i in inc] == ["g1", "g5"]             # case-insensitive; matches summary text too ("vinyl" in g1's description)
-    exc = news.parse_feed(RSS, FEED, cutoff="2026-08-22", include=[], exclude=["gossip"])
-    assert [i["external_id"] for i in exc] == ["g1", "g5"]
-    both = news.parse_feed(RSS, FEED, cutoff="2026-08-22", include=["vinyl"], exclude=["reissue"])
-    assert [i["external_id"] for i in both] == ["g1"]
+def test_tabloid_stories_are_dropped_whatever_feed_they_come_through():
+    rss = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Aggregator</title>
+      <item><title>Fine story</title><link>https://www.bbc.co.uk/news/1</link><guid>a</guid></item>
+      <item><title>Sun story</title><link>https://www.thesun.co.uk/news/1</link><guid>b</guid></item>
+      <item><title>Mail story</title><link>https://www.dailymail.co.uk/news/2</link><guid>c</guid></item>
+      <item><title>Express story</title><link>https://express.co.uk/3</link><guid>d</guid></item></channel></rss>"""
+    assert [i["title"] for i in news.parse_feed(rss, FEED, cutoff=0)] == ["Fine story"]
+    assert news.is_tabloid("https://www.mirror.co.uk/x") and news.is_tabloid("https://metro.co.uk/x") and not news.is_tabloid("https://www.theguardian.com/x")
+    assert not news.is_tabloid("https://notthesun.co.uk.example.com/")
 
 
 def test_atom_feeds_work_too():
     atom = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>A</title><entry><title>Atom story</title><id>a1</id>
       <link href="https://ex.com/a"/><updated>2026-09-20T10:00:00Z</updated></entry></feed>"""
-    assert [i["title"] for i in news.parse_feed(atom, FEED, cutoff="2026-08-01", include=[], exclude=[])] == ["Atom story"]
+    assert [i["title"] for i in news.parse_feed(atom, FEED, cutoff=calendar.timegm((2026, 8, 1, 0, 0, 0)))] == ["Atom story"]
 
 
 # =============================================================== curation rules
@@ -624,29 +637,41 @@ def test_radar_view_drops_past_gigs():
 
 def test_news_fetch_survives_one_broken_feed(monkeypatch):
     patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(200, content=RSS), "https://bad.example/": httpx.Response(500)})
-    settings = {"feeds": [{"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True},
-                          {"id": "bad", "name": "Bad", "url": "https://bad.example/feed", "enabled": True},
-                          {"id": "off", "name": "Off", "url": "https://off.example/feed", "enabled": False}],
-                "include": [], "exclude": [], "max_age_days": 3650}
+    settings = sections({"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True},
+                        {"id": "bad", "name": "Bad", "url": "https://bad.example/feed", "enabled": True},
+                        {"id": "off", "name": "Off", "url": "https://off.example/feed", "enabled": False})
     out = run(news.widget.fetch(settings))
-    assert out["feeds"] == 1 and out["errors"] == ["Bad: HTTPStatusError"]
+    assert out["ok"] == 1 and out["errors"] == ["Bad (Music): HTTPStatusError"]
+    assert out["feeds"]["good"] == {"ok": True, "items": 4, "last24": 0} and out["feeds"]["bad"]["ok"] is False and "off" not in out["feeds"]
     assert {i["source"] for i in content.list_items("news")["items"]} == {"good"}
-    assert content.list_items("news")["new"] == 0                   # first fetch of a feed is a baseline
+    assert content.list_items("news")["new"] == 0                   # stories never arrive as "new" any more
 
     patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(500), "https://bad.example/": httpx.Response(500)})
-    with pytest.raises(RuntimeError, match="Good: HTTPStatusError; Bad"):
+    with pytest.raises(RuntimeError, match=r"Good \(Music\): HTTPStatusError; Bad"):
         run(news.widget.fetch(settings))                                                        # everything failing IS an error (stale badge)
 
 
-def test_news_fetch_prunes_by_the_configured_retention_not_a_fixed_45_days(monkeypatch):
-    content.upsert_items("news", "stale-source", [item("old")], baseline=True)
+def test_news_fetch_prunes_each_section_by_its_own_retention(monkeypatch):
+    content.upsert_items("news", "good", [item("old", artist=None)], baseline=True)
+    content.upsert_items("news", "gone-feed", [item("orphan", artist=None)], baseline=True)
     with db.db() as con:
-        con.execute("UPDATE feed_items SET last_seen = ? WHERE source = 'stale-source'", (int(time.time()) - 100 * 86400,))
+        con.execute("UPDATE feed_items SET last_seen = ?", (int(time.time()) - 100 * 86400,))
     patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(200, content=RSS)})
-    settings = {"feeds": [{"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True}],
-                "include": [], "exclude": [], "max_age_days": 180}      # the item is 100 days old: a fixed 45-day prune would wrongly delete it
+    run(news.widget.fetch(sections({"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True}, keep=180)))
+    left = {i["title"] for i in content.list_items("news")["items"]}
+    assert "Title old" in left                                       # 100 days < the section's 180
+    assert "Title orphan" not in left                                     # its feed is in no section any more: gone after 30 days
+
+
+def test_news_fetch_keeps_what_you_set_on_a_story_through_a_refresh(monkeypatch):
+    patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(200, content=RSS)})
+    settings = sections({"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True})
     run(news.widget.fetch(settings))
-    assert "stale-source" in {i["source"] for i in content.list_items("news")["items"]}          # survives — 100 < the configured 180
+    with db.db() as con:
+        con.execute("UPDATE feed_items SET meta = json_set(meta, '$.read', json('true'), '$.vote', 1, '$.revealed', json('true')) WHERE external_id = 'ex.com/1'")
+    run(news.widget.fetch(settings))                                 # the same story comes round again
+    meta = next(i for i in content.list_items("news")["items"] if i["title"] == "Gojira announce huge tour")["meta"]
+    assert meta["read"] is True and meta["vote"] == 1 and meta["revealed"] is True and meta["summary"] == "Tour dates & vinyl"
 
 
 def test_match_artist_tags_prefers_longest_name_and_ignores_partial_words():
@@ -657,31 +682,20 @@ def test_match_artist_tags_prefers_longest_name_and_ignores_partial_words():
     assert news.match_artist_tags("", ["Gojira"]) == [] and news.match_artist_tags("Gojira tour", []) == []
 
 
-def test_news_fetch_tags_items_with_mentioned_followed_artists(monkeypatch):
+def test_news_fetch_tags_music_stories_with_mentioned_followed_artists(monkeypatch):
     content.add_artist("Gojira")
     patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(200, content=RSS)})
-    settings = {"feeds": [{"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True}],
-                "include": [], "exclude": [], "max_age_days": 3650}
-    run(news.widget.fetch(settings))
+    run(news.widget.fetch(sections({"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True})))
     items = {i["title"]: i for i in content.list_items("news")["items"]}
     assert items["Gojira announce huge tour"]["meta"]["artists"] == ["Gojira"]
     assert items["Celebrity gossip"]["meta"]["artists"] == []                             # no follow mentioned -> tagged, but empty
 
 
-def test_news_per_feed_keywords_override_the_global_list_not_add_to_it(monkeypatch):
+def test_only_the_music_section_tags_bands(monkeypatch):
+    content.add_artist("Gojira")
     patch_http(monkeypatch, news, {"https://good.example/": httpx.Response(200, content=RSS)})
-    settings = {"feeds": [{"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True, "include": ["gossip"]}],
-                "include": ["vinyl"], "exclude": [], "max_age_days": 3650}                # global include would keep the vinyl stories instead
-    run(news.widget.fetch(settings))
-    titles = {i["title"] for i in content.list_items("news")["items"]}
-    assert titles == {"Celebrity gossip"}                                                 # only the feed's own include list applied, not a union with the global one
-
-
-def test_switching_a_feed_off_hides_its_items_immediately():
-    content.upsert_items("news", "a", [item("1", artist=None)], baseline=True)
-    content.upsert_items("news", "b", [item("2", artist=None)], baseline=True)
-    s = {"feeds": [{"id": "a", "name": "A", "enabled": True}, {"id": "b", "name": "B", "enabled": False}]}
-    assert {i["source"] for i in news.widget.view(None, s, NOW)["items"]} == {"a"}
+    run(news.widget.fetch(sections({"id": "good", "name": "Good", "url": "https://good.example/feed", "enabled": True}, sid="world")))
+    assert all("artists" not in i["meta"] for i in content.list_items("news")["items"])
 
 
 # =============================================================== booked gigs + settings validation
@@ -705,24 +719,16 @@ def test_content_settings_are_validated_and_secrets_stay_secret():
         with pytest.raises(ValueError):
             r.merge_settings({}, bad)
     for w, bad in ((releases.widget, {"types": ["Podcast"]}), (releases.widget, {"lookback_days": 1}), (vinyl.widget, {"max_pages": 0}), (vinyl.widget, {"shops": [{"name": "x", "url": "ftp://x"}]}), (vinyl.widget, {"shops": [{"name": "x", "url": "https://x", "collection": "Not A Handle!"}]}),
-                   (news.widget, {"feeds": [{"name": "x", "url": "ftp://x"}]}), (news.widget, {"include": "vinyl"}), (news.widget, {"max_age_days": 1})):
+                   (news.widget, {"feeds": []}), (news.widget, {"latest_hours": 1}), (news.widget, {"f1_watched": "17"}),
+                   (news.widget, {"sections": [{"name": "x", "feeds": [{"name": "x", "url": "ftp://x"}]}]}),
+                   (news.widget, {"sections": [{"name": "x", "exclude": "vinyl"}]}), (news.widget, {"sections": [{"name": "x", "keep_days": 1}]}),
+                   (news.widget, {"sections": []})):
         with pytest.raises(ValueError):
             w.merge_settings({}, bad)
-    feeds = news.widget.merge_settings({}, {"feeds": [{"name": "Same Name", "url": "https://a/f"}, {"name": "Same Name", "url": "https://b/f"}]})["feeds"]
-    assert [f["id"] for f in feeds] == ["same-name", "same-name-2"]                       # ids stay unique
-
-
-def test_per_feed_keywords_are_validated_and_only_stored_when_set():
-    feeds = news.widget.merge_settings({}, {"feeds": [
-        {"name": "Custom", "url": "https://a/f", "include": ["vinyl", " tour "], "exclude": []},
-        {"name": "Plain", "url": "https://b/f"},
-    ]})["feeds"]
-    assert feeds[0]["include"] == ["vinyl", "tour"] and "exclude" not in feeds[0]          # trimmed; an empty list isn't worth storing
-    assert "include" not in feeds[1] and "exclude" not in feeds[1]                         # falls back to the global lists at fetch time
-    with pytest.raises(ValueError):
-        news.widget.merge_settings({}, {"feeds": [{"name": "x", "url": "https://a/f", "include": "vinyl"}]})
-    with pytest.raises(ValueError):
-        news.widget.merge_settings({}, {"feeds": [{"name": "x", "url": "https://a/f", "include": ["y" * 61]}]})
+    secs = news.widget.merge_settings({}, {"sections": [{"name": "A", "feeds": [{"name": "Same", "url": "https://a/f"}, {"name": "Same", "url": "https://b/f"}]},
+                                                       {"name": "A", "feeds": [{"id": "a-same", "name": "Again", "url": "https://c/f"}]}, {"name": "Archive"}]})["sections"]
+    assert [s["id"] for s in secs] == ["a", "a-2", "archive-2"]                            # section ids unique, and never one of the page's own tabs
+    assert [f["id"] for s in secs for f in s["feeds"]] == ["a-same", "a-same-2", "a-same-2-2"]   # feed ids unique across every section
 
 
 # =============================================================== catch-up backlog
@@ -824,7 +830,8 @@ def test_artwork_hosts_are_the_only_images_the_csp_lets_through(client):
     csp = client.get("/guest").headers["content-security-policy"]
     img = next(part for part in csp.split(";") if part.strip().startswith("img-src"))
     assert set(img.split()[1:]) == {"'self'", "data:", "https://cdn.shopify.com", "https://imagescdn.juno.co.uk", "https://static.wixstatic.com", "https://coverartarchive.org", "https://archive.org", "https://*.archive.org",
-                                     "https://i.scdn.co"}                                         # Spotify artwork, for the Music page's player bar
+                                     "https://i.scdn.co",                                         # Spotify artwork, for the Music page's player bar
+                                     *(f"https://{h}" for h in news.IMAGE_HOSTS)}                # the News page's story pictures — the same list ingest keeps
     assert "script-src 'self'" in [part.strip() for part in csp.split(";")]                    # scripts are still first-party only
 
 

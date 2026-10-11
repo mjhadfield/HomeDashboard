@@ -1,21 +1,16 @@
 // Owner dashboard bootstrap: load state, render cards, keep them fresh from the event stream.
 import * as api from './api.js';
 import { cards, ui, selectedSlug } from './cards.js';
-import { newsDef, newsUi, vinylUi } from './content-cards.js';
+import { vinylUi } from './content-cards.js';
 import { Shell } from './shell.js';
 import { $, $$, esc, hostUrl, ico, tickClock, tickUptimes, toast } from './util.js';
 import { BUILTIN, chosen, currentLook, currentTheme, specOf, syncThemes, useTheme } from './theme.js';
 import * as music from './music.js';
+import * as news from './news.js';
 
 let state = null;
 const shell = new Shell($('#grid'), cards, id => renderCard(id));
 const defs = new Map(cards.map(c => [c.id, c]));
-
-// News lives on its own page now, not the dashboard grid — a second Shell, permanently "expanded"
-// (pinnedOpen: filters/search visible, all rows shown, no expand button), reusing the same card def and
-// render function unchanged. Item-action clicks (pin/dismiss/mute/mark-seen) still work with no new code —
-// they're delegated at `document` level below, not scoped to either shell's own grid.
-const newsShell = new Shell($('#view-news'), [{ ...newsDef, pinnedOpen: true }], id => renderCard(id));
 
 // The Monitoring tile's data lives here, not on `state` — `state` gets wholesale replaced by every unrelated
 // dashboard refresh (any widget's own refresh notifies over SSE and triggers a full re-fetch; the System
@@ -26,7 +21,6 @@ let monitoring = null;
 
 function renderCard(id) {
   if (!state) return;
-  if (id === 'news') { newsShell.update(id, newsDef.render(state, newsShell.ctx(id))); return; }
   if (id === 'monitoring') { shell.update(id, defs.get(id).render({ ...state, monitoring }, shell.ctx(id))); return; }
   shell.update(id, defs.get(id).render(state, shell.ctx(id)));
   if (id === 'vinyl') {
@@ -91,12 +85,23 @@ function setMusicSrc() {
 const sqlFrame = $('#sql-frame');
 let sqlSrcSet = false, sqlOrigin = null;
 
-// The two embedded pages follow Citadel's theme, custom colours and background included: told on every load of
-// theirs (the ?theme= param alone can't carry a custom theme) and on every change here.
+// The embedded pages follow Citadel's theme, custom colours and background included (Odysseus: light/dark only):
+// told on every load of theirs (the ?theme= param alone can't carry a custom theme) and on every change here.
+// Companion's gear button opens Music Maintenance inside that same frame, a different origin (its own project),
+// so the Companion frame is told at both; the browser drops whichever doesn't match the page it's showing.
+function maintenanceOrigin() {
+  const proj = state?.projects.find(p => p.slug === 'music-maintenance' && p.url);
+  try { return proj ? new URL(hostUrl(proj.url.replace('{host}', state.ip || location.hostname))).origin : null; } catch { return null; }
+}
 function tellFrames() {
   const look = currentLook();
-  if (musicSrcSet) musicFrame.contentWindow?.postMessage(look, MUSIC_ORIGIN);
+  if (musicSrcSet) {
+    musicFrame.contentWindow?.postMessage(look, MUSIC_ORIGIN);
+    const maint = maintenanceOrigin();
+    if (maint) musicFrame.contentWindow?.postMessage(look, maint);
+  }
   if (sqlSrcSet && sqlOrigin) sqlFrame.contentWindow?.postMessage(look, sqlOrigin);
+  if (aiSrcSet && aiOrigin) aiFrame.contentWindow?.postMessage(look, aiOrigin);
 }
 musicFrame.addEventListener('load', tellFrames);
 sqlFrame.addEventListener('load', tellFrames);
@@ -110,17 +115,21 @@ function setSqlSrc() {
   sqlSrcSet = true;
 }
 
-// Same "set once" latch again, for the Odysseus page — mirrors setMediaSrc() exactly (a link only, no theme
-// messaging: like Jellyfin, Odysseus has its own look and doesn't listen for Citadel's).
+// Same "set once" latch again, for the Odysseus page (a link only). Odysseus follows Citadel's light/dark mode
+// too, but only the base mode: it swaps between its own "Citadel" and "Citadel Dark" themes (a local patch on
+// its `local` branch, static/js/theme.js), so it reads ?citadel_theme= and the same message as the other frames.
 const aiFrame = $('#ai-frame');
-let aiSrcSet = false;
+let aiSrcSet = false, aiOrigin = null;
 function setAiSrc() {
   if (aiSrcSet) return;
   const link = state.links.find(l => l.for_ai);
   if (!link) return;
-  aiFrame.src = link.url;
+  const sep = link.url.includes('?') ? '&' : '?';
+  aiFrame.src = `${link.url}${sep}citadel_theme=${currentTheme()}`;
+  try { aiOrigin = new URL(link.url).origin; } catch { aiOrigin = null; }
   aiSrcSet = true;
 }
+aiFrame.addEventListener('load', tellFrames);
 
 // The shortcut row across the top (Settings → Widgets → Shortcuts): invisible until something is configured,
 // or when it's switched off there. Links open in a new tab.
@@ -149,7 +158,6 @@ function renderShortcuts() {
 function renderAll() {
   renderShortcuts();
   cards.forEach(c => renderCard(c.id));
-  renderCard('news');
   renderAlerts();
   setMediaSrc();
   setMusicSrc();
@@ -166,7 +174,7 @@ function renderAll() {
 // for project status) just for one tile. The server-side reading itself is a background loop now too (see
 // app/monitor.py) — this fetch just reads its latest cached value, no live sensor read in the request at all.
 async function pollMonitoring() {
-  if (!state || document.hidden) return;
+  if (!state || document.hidden || VIEWS.includes(location.hash.slice(1)) && location.hash !== '#home') return;   // the tile is on Home only
   try { monitoring = await api.get('/api/owner/monitoring'); } catch { /* keep the last good reading, don't blank the tile over one dropped request */ }
   renderCard('monitoring');
 }
@@ -182,11 +190,13 @@ const VIEWPORT = viewportMeta.content;
 function route() {
   const v = VIEWS.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home';
   viewportMeta.content = FRAME_VIEWS.includes(v) ? `${VIEWPORT}, interactive-widget=resizes-content` : VIEWPORT;
+  document.documentElement.dataset.page = v;         // the header's middle slot follows it (shortcuts, or the Music page's player)
   $$('.view').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   $$('.rail a[data-view], .tabbar a[data-view]').forEach(a => {
     if (a.dataset.view === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   music.onView(v);                                  // the Music page (music.js) only polls Spotify while it's on screen
+  news.onView(v);                                   // the News page (news.js) loads its own stories when shown
 }
 addEventListener('hashchange', route);
 route();
@@ -281,27 +291,6 @@ document.addEventListener('click', async e => {
     await load();
     return;
   }
-  // A click on an unread headline's own link (target="_blank" — the browser's default navigation already
-  // opens it regardless of what happens here): mark it read, distinct from status="seen". Not gated on success
-  // blocking anything, since the article's already open in its own tab either way.
-  const readLink = e.target.closest('[data-item-read]');
-  if (readLink) {
-    try { await api.post(`/api/owner/items/${readLink.dataset.itemRead}/read`); } catch (err) { toast(err.message); }
-    await load();
-    return;
-  }
-  const vinylToggle = e.target.closest('[data-news-vinyl]');
-  if (vinylToggle) {                                                        // News-only "vinyl stories" filter: pure client-side, no server round-trip
-    newsUi.vinyl = !newsUi.vinyl;
-    renderCard('news');
-    return;
-  }
-  const resetFilters = e.target.closest('[data-news-reset]');
-  if (resetFilters) {
-    newsUi.source = ''; newsUi.tag = ''; newsUi.vinyl = false;
-    renderCard('news');
-    return;
-  }
   const vinylMode = e.target.closest('[data-vinyl-mode]');
   if (vinylMode) {                                                          // dual-content tile header: Shell never touches this markup again after building it, so the pressed state is set here directly
     vinylUi.mode = vinylMode.dataset.vinylMode;
@@ -332,13 +321,6 @@ document.addEventListener('click', async e => {
     renderCard('projects');
     pollLogs();
   }
-});
-
-document.addEventListener('change', e => {
-  const source = e.target.closest('[data-news-source]');
-  if (source) { newsUi.source = source.value; renderCard('news'); return; }   // News-only source filter: pure client-side, no server round-trip
-  const tagSelect = e.target.closest('[data-news-tag-select]');
-  if (tagSelect) { newsUi.tag = tagSelect.value; renderCard('news'); return; } // News-only band filter: same pattern
 });
 
 // A pre-order's release-date field commits on blur, not on `change` — Chrome fires `change` on a date input

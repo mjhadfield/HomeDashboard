@@ -3,16 +3,16 @@
    song) are derived from the theme's own accent and status colours. */
 
 .mu, .mu-scope { --src-history: var(--accent-hi); --src-shelf: var(--silver-hi); --src-deep: var(--warn); --src-new: var(--ok);
-  --src-gig: color-mix(in oklab, var(--bad) 70%, var(--accent-hi)); --bar-h: 76px; --bar-gap: 14px; }
-.mu[data-bar="compact"] { --bar-h: 48px; }
-.mu[data-bar="hidden"] { --bar-h: 0px; }
+  --src-gig: color-mix(in oklab, var(--bad) 70%, var(--accent-hi)); }
+.mu, .mu-bar { --bar-h: 76px; --bar-gap: 14px; }
+.mu[data-bar="compact"], .mu-bar[data-bar="compact"] { --bar-h: 48px; }
+.mu[data-bar="hidden"], .mu-bar[data-bar="hidden"] { --bar-h: 0px; }
 
 /* ---- page frame ---------------------------------------------------------------------------------------------------
-   Small screens scroll the page and float the bar over it (with room left at the bottom to scroll past it);
-   the fixed 1080p/1440p layout gives the bar its own row under the content, so it never covers anything. */
+   Smaller screens scroll the page; the fixed 1080p/1440p layout scrolls the panel instead. The player lives in the
+   header on a computer, so it never covers anything; on a phone it floats, and the panel leaves room to scroll past it. */
 #view-listen.is-active { display: block; }
 .mu__top { display: flex; align-items: center; gap: 12px 16px; margin-bottom: var(--gap); flex-wrap: wrap; }
-.mu__panel { padding-bottom: calc(var(--bar-h) + var(--bar-gap) * 2); }
 .mu__banner { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: var(--gap); border: 1px solid var(--edge-strong);
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent); font-size: 14px; }
 .mu__banner .i { color: var(--accent-soft); width: 20px; height: 20px; }
@@ -21,7 +21,6 @@
   #view-listen.is-active { display: flex; flex-direction: column; min-height: 0; }
   #view-listen > .mu { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .mu__panel { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 0 0; scrollbar-width: thin; }
-  .mu-bar { position: relative !important; inset: auto !important; margin-top: var(--bar-gap); flex: none; }
 }
 
 /* ---- section tabs ------------------------------------------------------------------------------------------------ */
@@ -279,12 +278,12 @@
 .mu-full .fullnote { padding: 10px 20px 14px; font: 11px var(--font-mono); color: var(--silver-dim); border-top: 1px solid var(--edge); }
 .mu-full .owned { color: var(--silver-hi); margin-left: 6px; }
 
-/* ---- the player bar ------------------------------------------------------------------------------------------------- */
-.mu-bar { position: fixed; z-index: 40; left: calc(88px + 28px); right: 28px; bottom: var(--bar-gap); height: var(--bar-h);
-  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 1.4fr) minmax(0, 1fr); align-items: center; gap: 22px; padding: 0 14px 0 16px;
-  background: color-mix(in srgb, var(--surface-2) 78%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
-  border: 1px solid var(--edge-strong); box-shadow: 0 -10px 40px -18px color-mix(in srgb, var(--accent) 45%, transparent); }
-.mu[data-bar="hidden"] .mu-bar { display: none; }
+/* ---- the player bar -------------------------------------------------------------------------------------------------
+   One element (#mu-bar, in index.html's header), shown only while the Music page is (app.js sets html[data-page]).
+   Computer: one line in the header's middle slot, standing in for the shortcut row, dropping parts as the slot narrows.
+   Phone: unchanged, it floats above the tab bar in three sizes (data-bar: full / compact / hidden; the sizer buttons). */
+.mu-bar { display: none; }
+html[data-page="listen"] .mu-bar:not(:empty) { display: grid; }
 .np { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .np .art { width: 52px; height: 52px; }
 .np__main { min-width: 0; }
@@ -304,7 +303,7 @@
 .prog__bar::before { content: ""; position: absolute; inset: -6px 0; }
 .prog__bar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, var(--accent-deep), var(--accent-hi)); }
 .side { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.mu .side .vol { width: 84px; flex: none; }
+.mu-bar .side .vol { width: 84px; flex: none; }
 .side .sizer { display: flex; gap: 2px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--edge); }
 .dev { position: relative; min-width: 0; display: flex; }
 .dev__btn { max-width: 160px; min-width: 0; }               /* shrinks (name cut short) rather than run under the volume */
@@ -321,14 +320,47 @@
 .mu-bar--msg .off { display: flex; gap: 12px; align-items: center; color: var(--silver-mute); min-width: 0; }
 .mu-bar--msg .off b { color: var(--silver-hi); }
 .mu-bar--msg .acts { display: flex; gap: 8px; align-items: center; }
-/* compact: one slim line */
-.mu[data-bar="compact"] .mu-bar { grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; }
-.mu[data-bar="compact"] .np .art { width: 32px; height: 32px; }
-.mu[data-bar="compact"] .np__fact, .mu[data-bar="compact"] .ctl .prog, .mu[data-bar="compact"] .side .vol, .mu[data-bar="compact"] .side > .i,
-.mu[data-bar="compact"] .ctl__b [data-mu-cmd="shuffle"], .mu[data-bar="compact"] .ctl__b [data-mu-cmd="repeat"], .mu[data-bar="compact"] .ctl__b [data-mu-cmd="previous"] { display: none; }
-.mu[data-bar="compact"] .np__main { display: flex; gap: 8px; align-items: baseline; }
-.mu[data-bar="compact"] .ctl__b .btn--play { width: 30px; height: 30px; }
-.mu[data-bar="compact"] .mu-bar::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: var(--p, 0%); background: var(--accent-hi); }
+/* computer: in the header */
+@media (min-width: 761px) {
+  html[data-page="listen"] .top__mid > .shortcuts { display: none; }
+  .mu-bar { flex: 1 1 auto; position: relative; height: 42px; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 18px;
+    padding: 0 6px 0 4px; background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--edge); }
+  .mu-bar .np { gap: 10px; }
+  .mu-bar .np .art { width: 32px; height: 32px; }
+  .mu-bar .np__t { font-size: 13.5px; line-height: 1.25; }
+  .mu-bar .np__a { font-size: 11.5px; line-height: 1.3; }
+  .mu-bar .np__fact, .mu-bar .sizer, .mu-status .mu-mini { display: none; }       /* no sizes here: it covers nothing */
+  .mu-bar .ctl { display: flex; align-items: center; gap: 14px; }
+  .mu-bar .ctl__b { gap: 4px; }
+  .mu-bar .ctl__b .btn--play { width: 32px; height: 32px; }
+  .mu-bar .prog { width: clamp(150px, 20cqi, 300px); }
+  .mu-bar .sp-logo { height: 18px; min-width: 63px; }
+  .mu-bar .dev__menu { top: calc(100% + 10px); bottom: auto; }                  /* opens downwards from the header */
+  .mu-bar--msg { grid-template-columns: minmax(0, 1fr) auto; }
+  .mu-bar--msg .off { white-space: nowrap; overflow: hidden; }
+  .mu-bar--msg .off span { overflow: hidden; text-overflow: ellipsis; }
+  .mu-bar::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: var(--p, 0%); background: var(--accent-hi); display: none; }
+  @container topmid (max-width: 1000px) { .mu-bar .side .vol, .mu-bar .side > .i { display: none; } }
+  @container topmid (max-width: 860px) { .mu-bar .ctl__b [data-mu-cmd="shuffle"], .mu-bar .ctl__b [data-mu-cmd="repeat"] { display: none; } }
+  @container topmid (max-width: 720px) { .mu-bar .prog, .mu-bar .dev__btn span { display: none; } .mu-bar::after { display: block; } }
+  @container topmid (max-width: 540px) { .mu-bar .ctl__b [data-mu-cmd="previous"], .mu-bar .side__sp, .mu-bar--msg .off .i { display: none; } }
+}
+/* phone: floating above the tab bar, as it always has */
+@media (max-width: 760px) {
+  .mu-bar { position: fixed; z-index: 40; left: calc(88px + 28px); right: 28px; bottom: var(--bar-gap); height: var(--bar-h);
+    grid-template-columns: minmax(0, 1.2fr) minmax(300px, 1.4fr) minmax(0, 1fr); align-items: center; gap: 22px; padding: 0 14px 0 16px;
+    background: color-mix(in srgb, var(--surface-2) 78%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
+    border: 1px solid var(--edge-strong); box-shadow: 0 -10px 40px -18px color-mix(in srgb, var(--accent) 45%, transparent); }
+  html[data-page="listen"] .mu-bar[data-bar="hidden"] { display: none; }
+  /* compact: one slim line */
+  .mu-bar[data-bar="compact"] { grid-template-columns: minmax(0, 1fr) auto auto; gap: 14px; }
+  .mu-bar[data-bar="compact"] .np .art { width: 32px; height: 32px; }
+  .mu-bar[data-bar="compact"] .np__fact, .mu-bar[data-bar="compact"] .ctl .prog, .mu-bar[data-bar="compact"] .side .vol, .mu-bar[data-bar="compact"] .side > .i,
+  .mu-bar[data-bar="compact"] .ctl__b [data-mu-cmd="shuffle"], .mu-bar[data-bar="compact"] .ctl__b [data-mu-cmd="repeat"], .mu-bar[data-bar="compact"] .ctl__b [data-mu-cmd="previous"] { display: none; }
+  .mu-bar[data-bar="compact"] .np__main { display: flex; gap: 8px; align-items: baseline; }
+  .mu-bar[data-bar="compact"] .ctl__b .btn--play { width: 30px; height: 30px; }
+  .mu-bar[data-bar="compact"]::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: var(--p, 0%); background: var(--accent-hi); }
+}
 
 /* ---- new-playlist dialog ------------------------------------------------------------------------------------------- */
 .scrim { position: fixed; inset: 0; z-index: 90; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 16px; }
@@ -343,12 +375,12 @@
 @media (max-width: 1280px) {
   .pl-editor, .ggrid { grid-template-columns: 1fr; }
 }
-@media (max-width: 1000px) {
+@media (max-width: 760px) {
   .mu-bar { grid-template-columns: minmax(0, 1fr) auto; }
   .mu-bar .side .vol, .mu-bar .side > .i, .mu-bar .ctl .prog { display: none; }
 }
 @media (max-width: 760px) {
-  .mu { --bar-gap: 10px; }
+  .mu, .mu-bar { --bar-gap: 10px; }
   .mu__panel { padding-bottom: calc(var(--bar-h) + 90px); }
   .dtool { gap: 6px; }
   .dtool > .fchip { padding: 6px 7px; letter-spacing: .04em; }      /* All / Never played / Barely tried / By vibe: one row on a phone */

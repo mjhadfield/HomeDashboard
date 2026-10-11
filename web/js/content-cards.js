@@ -1,4 +1,4 @@
-// The five content cards: Next gig, Releases, Vinyl radar, Gig radar, Headlines.
+// The content cards: Next gig, Releases, Vinyl radar, Gig radar. (News has its own page: news.js.)
 // Every row can be pinned, dismissed, or its artist muted; the expanded view adds filters, search and a
 // "Dismissed" list you can restore from. Everything from the network passes through esc()/safeUrl().
 import { esc, ico, safeUrl, fmtDay, fmtDMY, relDays, hhmm, parseDate } from './util.js';
@@ -20,12 +20,6 @@ function niceDate(d) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return +d.slice(0, 4) === new Date().getFullYear() ? fmtDay(d) : `${fmtDay(d)} ${d.slice(0, 4)}`;   // the year only when it isn't this one
   if (/^\d{4}-\d{2}$/.test(d)) return parseDate(`${d}-01`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
   return d;
-}
-
-/** "today", "yesterday", "3d" — headlines only carry a day. */
-function dayAge(date, todayIso) {
-  const n = Math.round((parseDate(todayIso) - parseDate(date)) / 86400000);
-  return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n}d`;
 }
 
 // ---- row actions ------------------------------------------------------------------------------------------------
@@ -118,20 +112,6 @@ function plainRow(it, k, hide) {                              // no cover: gig r
     <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}<div class="feed__date">${esc(niceDate(it.date))}${esc(t)}</div>${acts(it)}</div></li>`;
 }
 
-// Clicking an unread headline both opens it (default <a> navigation, target="_blank") and marks it *read* —
-// a separate concept from status="seen" (which "Mark as seen"/"Mark all seen" already use for "acknowledged,
-// not necessarily opened"). data-item-read fires the dedicated /read endpoint, independent of status, so bulk
-// "mark as seen" never counts as having actually read something, and vice versa.
-function newsRow(it, k, hide, todayIso) {
-  const unread = !it.meta?.read;
-  const isNew = it.status === 'new' && unread;                    // "New" excludes anything already opened, even if status hasn't moved on
-  const readAttr = unread ? ` data-item-read="${it.id}"` : '';
-  return `<li class="feed feed--news${isNew ? ' feed--new' : ''}${it.status === 'pinned' ? ' feed--pinned' : ''}${hide ? ' more' : ''}"${hide ? ' hidden' : ''}>
-    <div class="feed__main"><div class="news__src">${esc(it.subtitle)}<span class="news__age">${esc(dayAge(it.date, todayIso))}</span></div>
-      <div class="feed__title feed__title--wrap">${link(it, it.title, readAttr)}</div></div>
-    <div class="feed__meta">${isNew ? '<span class="chip chip--fresh">New</span>' : ''}${acts(it)}</div></li>`;
-}
-
 // ---- filtering (expanded view) --------------------------------------------------------------------------------------
 export function narrow(data, ctx, todayIso, extra = {}) {
   let list = data.items;
@@ -174,9 +154,8 @@ function releases(s, ctx) {
 // ---- Vinyl radar: records you can pre-order, and what's already been bought ----------------------------------------
 
 // Dual-content tile: the header itself has two clickable segments ("Vinyl Radar" / "Confirmed Pre-orders") that swap
-// the whole body, News's newsUi-style bolt-on state rather than an extension to Shell's shared per-card state
-// (filter/search only, used by every other grid card too) — this is a plain two-value enum, nothing dynamic like
-// News's live source/tag options, so it doesn't need a generic mechanism.
+// the whole body: plain bolt-on state rather than an extension to Shell's shared per-card state (filter/search only,
+// used by every other grid card too) — it's a two-value enum, so it doesn't need a generic mechanism.
 export const vinylUi = { mode: 'radar' };
 
 function vinylHeader() {
@@ -243,49 +222,6 @@ function radar(s, ctx) {
     unit: `shows nearby · ≤${w.data?.radius ?? 50} mi`, compact: LONG });
 }
 
-// ---- Headlines ---------------------------------------------------------------------------------------------------
-const VINYL_WORDS = /vinyl|\bLPs?\b|reissue|repress|pressing|variant|colou?red|box ?set/i;
-
-// Source/tag/vinyl filtering are News-only, so they live here as plain browser-side UI state (same pattern as
-// cards.js's own `ui`) rather than as Shell filter chips: Shell's chip set is static, built once per card
-// definition, and shared with Releases/Vinyl/Radar — source/tag options here depend on live data (which feeds
-// are enabled, which artists are actually mentioned today), which that shared mechanism isn't set up for.
-export const newsUi = { source: '', tag: '', vinyl: false };
-
-function newsToolbar(d) {
-  const sourceCounts = {};
-  for (const i of d.items) if (i.status === 'new') sourceCounts[i.meta?.feed] = (sourceCounts[i.meta?.feed] || 0) + 1;
-  const sourceOpts = Object.entries(d.sources || {})
-    .map(([id, name]) => `<option value="${esc(id)}"${newsUi.source === id ? ' selected' : ''}>${esc(name)}${sourceCounts[id] ? ` (${sourceCounts[id]} new)` : ''}</option>`).join('');
-  const pool = newsUi.source ? d.items.filter(i => i.meta?.feed === newsUi.source) : d.items;                   // tag options reflect the chosen source, if any
-  const tags = [...new Set(pool.flatMap(i => i.meta?.artists || []))].sort((a, b) => a.localeCompare(b));
-  const tagOpts = tags.map(name => `<option value="${esc(name)}"${newsUi.tag === name ? ' selected' : ''}>${esc(name)}</option>`).join('');
-  const active = newsUi.source || newsUi.tag || newsUi.vinyl;
-  return `<div class="news__toolbar maxbar">
-    <select class="news__source" data-news-source aria-label="Filter by source"><option value="">All sources</option>${sourceOpts}</select>
-    <select class="news__source" data-news-tag-select aria-label="Filter by band"><option value="">All bands</option>${tagOpts}</select>
-    <button class="fchip" data-news-vinyl aria-pressed="${newsUi.vinyl}">Vinyl</button>
-    <button class="fchip" data-news-reset${active ? '' : ' disabled'}>Reset filters</button></div>`;
-}
-
-function newsCard(s, ctx) {
-  const w = s.widgets.news;
-  const d = w.data;
-  const errs = d?.errors?.length ? `<div class="note more" hidden>Some feeds couldn't be read: ${esc(d.errors.join(', '))}</div>` : '';
-  const bySource = i => !newsUi.source || i.meta?.feed === newsUi.source;
-  const byTag = i => !newsUi.tag || (i.meta?.artists || []).includes(newsUi.tag);
-  const byVinyl = i => !newsUi.vinyl || VINYL_WORDS.test(i.title);
-  const filtering = d && (newsUi.source || newsUi.tag || newsUi.vinyl);
-  const keep = i => bySource(i) && byTag(i) && byVinyl(i);
-  const w2 = filtering ? { ...w, data: { ...d, items: d.items.filter(keep), dismissed: d.dismissed.filter(keep) } } : w;
-  const result = feedCard(s, ctx, { w: w2, kind: 'news', hint: errs, render: (it, k, hide, today) => newsRow(it, k, hide, today),
-    extra: { unread: i => !i.meta?.read, 'news-new': i => i.status === 'new' && !i.meta?.read },
-    emptyIcon: 'news', emptyTitle: 'No headlines', emptyText: 'Add feeds or loosen your keyword rules in Settings → News.',
-    unit: `headlines · ${Object.keys(d?.sources || {}).length} feeds` });
-  if (result && d && ctx.expanded) result.body = newsToolbar(d) + result.body;
-  return result;
-}
-
 // ---- Next gig -------------------------------------------------------------------------------------------------------
 function gigLine(g, past = false) {
   const where = [g.venue, g.city].filter(Boolean).join(', ');
@@ -331,8 +267,3 @@ export const contentCards = [
     filters: [...CURATE, { label: 'Has date', value: 'dated' }, DISMISSED] },
   { id: 'radar', area: 'radar', label: 'Gig radar', flush: true, render: radar, search: true, markSeen: 'radar', filters: [...CURATE, { label: 'Tributes', value: 'tribute' }, DISMISSED] },
 ];
-
-// Headlines moved off the dashboard onto its own News page (see web/js/news.js) — kept here since it's still
-// just a content card, and the render function is unchanged.
-export const newsDef = { id: 'news', area: 'news', label: 'Headlines', flush: true, render: newsCard, search: true, markSeen: 'news',
-  filters: [{ label: 'Unread', value: 'unread' }, { label: 'New', value: 'news-new' }, { label: 'Pinned', value: 'pinned' }, DISMISSED, { label: 'All', value: 'all' }] };

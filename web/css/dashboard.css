@@ -45,13 +45,18 @@
 /* Same chamfered, hairline-gradient-border shell as .card (components.css) — an iframe can't carry
    ::before/::after itself, so the shell is a real wrapper element around it instead. This only reaches
    the iframe's own border/frame; whatever renders *inside* it (Jellyfin's or Companion's own UI, incl.
-   their scrollbars) is that document's own CSS and out of reach from here. */
+   their scrollbars) is that document's own CSS and out of reach from here.
+   The corners are cut with a mask, not .card's clip-path: a clip-path around an iframe made Chromium drop whole
+   rows of the embedded page while it scrolled (flicker), and a mask gives the same corners without that. Each
+   gradient cuts one corner and covers just over half the height. */
 .frame-shell {
   position: absolute; inset: 0;
   display: flex;
   padding: 1px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--silver) 30%, transparent), color-mix(in srgb, var(--accent) 20%, transparent) 45%, color-mix(in srgb, var(--silver) 9%, transparent));
-  clip-path: polygon(0 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer), 100% 100%, var(--chamfer) 100%, 0 calc(100% - var(--chamfer)));
+  mask:
+    linear-gradient(225deg, transparent calc(var(--chamfer) * .7071), #000 0) top / 100% 51% no-repeat,
+    linear-gradient(45deg, transparent calc(var(--chamfer) * .7071), #000 0) bottom / 100% 51% no-repeat;
 }
 .frame-shell iframe { flex: 1; width: 100%; height: 100%; border: 0; background: var(--surface); }
 html.has-bg .frame-shell iframe { background: transparent; }    /* a custom theme's picture shows through the embedded page */
@@ -75,6 +80,10 @@ html.has-bg .frame-shell iframe { background: transparent; }    /* a custom them
 .top__brand { display: flex; align-items: baseline; gap: 14px; }
 .top__brand .wordmark { font-size: 22px; }
 .top__right { display: flex; align-items: center; gap: 14px; }
+
+/* ---- The header's middle slot: the shortcut row on most pages; the Music page puts its player here instead (music.css).
+   A size container, so what's in it can drop parts as it narrows. */
+.top__mid { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; container: topmid / inline-size; }
 
 /* ---- Shortcut row (Settings → Widgets → Shortcuts) ------------------------ */
 .shortcuts { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 8px;
@@ -178,11 +187,6 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .feed__date { font-family: var(--font-mono); font-size: 12px; color: var(--silver-mute); white-space: nowrap; text-align: right; min-width: 78px; }
 .pane[hidden] { display: none; }
 
-.news { display: block; padding: 8px 16px; }
-.news:hover .news__title { color: var(--silver-hi); }
-.news__src { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-soft); }
-.news__title { color: var(--silver-hi); font-weight: 500; line-height: 1.3; transition: color .2s; }
-.news__age { font-family: var(--font-mono); font-size: 11px; color: var(--silver-dim); margin-left: 8px; }
 
 /* ---- System bars -------------------------------------------------------- */
 .bar { margin-bottom: 14px; }
@@ -198,12 +202,17 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .mon-col { display: flex; flex-direction: column; padding: 2px 0; }
 .mon-col:first-child { border-right: 1px solid var(--edge); padding-right: 28px; }
 .mon-col:last-child { padding-left: 28px; }
-.mon-col__label { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); margin-bottom: 12px; }
-.mon-stat { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.mon-stat__label { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); }
-.mon-stat__val { font-family: var(--font-mono); font-size: 34px; color: var(--silver-hi); }
-.mon-stat__val--warm { color: var(--warn); }
-.mon-stat__val--hot { color: var(--bad); }
+.mon-col { min-height: 0; }
+.mon-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.mon-col__label { font-family: var(--font-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); }
+.mon-temp { font-family: var(--font-mono); font-size: 22px; line-height: 1; color: var(--silver-hi); white-space: nowrap; }
+.mon-temp small { margin-right: 8px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-dim); }
+.mon-temp--warm { color: var(--warn); }
+.mon-temp--hot { color: var(--bad); }
+/* the bars share out whatever height the card has (tight in a browser window, airier full-screen) */
+.mon-bars { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: space-evenly; gap: 8px; }
+.mon-bars .bar { margin-bottom: 0; }
+.mon-bars .bar__top { margin-bottom: 5px; }
 .mon-section { margin-top: 18px; }
 .mon-section:first-child { margin-top: 0; }
 .mon-section .hud { display: block; margin-bottom: 10px; }
@@ -301,9 +310,6 @@ button.tile:disabled { cursor: default; opacity: .6; transform: none; }
 .fchip:disabled:hover { color: var(--silver-mute); border-color: var(--edge); }
 .search { margin-left: auto; min-width: 200px; padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: var(--well); border: 1px solid var(--edge); }
 .search::placeholder { color: var(--silver-dim); }
-.news__toolbar { border-bottom: 1px solid var(--edge); margin-bottom: 4px; }
-.news__source { padding: 6px 10px; font: 12px var(--font-mono); color: var(--silver-hi); background: var(--well); border: 1px solid var(--edge); }
-.news__source option { background: var(--surface-3); }
 
 /* ==========================================================================
    Expanded card (maximised)
@@ -349,8 +355,6 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
   #view-home.is-active { display: flex; flex-direction: column; }
   #view-home.is-active #alerts { flex: none; }
   #view-home.is-active #grid { flex: 1; min-height: 0; }
-  #view-news.is-active { display: flex; flex-direction: column; }
-  #view-news .card { flex: 1; min-height: 0; }
   #view-media.is-active { height: auto; }
   #view-music.is-active { height: auto; }
   #view-sql.is-active { height: auto; }
@@ -406,7 +410,6 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .card.is-max .feed__sub { font-size: 14px; }
 .card.is-max .feed__date { font-size: 13px; }
 .card.is-max .news { padding: 16px 24px; }
-.card.is-max .news__title { font-size: 17px; }
 .card.is-max .tiles { grid-auto-rows: auto; flex: none; }
 
 @media (min-width: 1800px) and (min-height: 860px) {
@@ -482,10 +485,7 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
    a quieter, permanent marker), plus a tinted wash across the whole row, not just a hairline. (A row is only ever one
    status at a time — pinning something moves it off 'new' — so this and .feed--pinned below never both apply.) */
 .feed--new { box-shadow: inset 3px 0 0 var(--accent-hi), 0 0 20px -12px var(--accent-hi); background: linear-gradient(90deg, color-mix(in srgb, var(--accent-hi) 13%, transparent), transparent 55%); }
-.feed--news { align-items: flex-start; }
-.feed--news .feed__meta { align-self: center; }
 .feed__title--wrap { white-space: normal; line-height: 1.3; }
-.feed .news__src { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-soft); }
 .feed__acts { width: auto; min-width: 100px; }   /* a new item's row gets a fourth (mark-seen) button, so this can't stay fixed-width */
 .feed__acts--wide { width: auto; opacity: 1; }
 .feed:hover .feed__acts--wide { opacity: 1; }

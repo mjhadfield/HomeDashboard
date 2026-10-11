@@ -24,6 +24,7 @@ from .widgets.base import Widget
 log = logging.getLogger("hub.maintenance")
 
 KEEP_BACKUPS = 7
+BACKUP_GLOB = "hub-????-??-??.sqlite"            # the nightly copies only — never hand-made snapshots like hub-before-x.sqlite
 MIN_FREE_BYTES = 1_000_000_000
 
 
@@ -69,9 +70,9 @@ def _do_backup(day: str) -> dict[str, Any]:
         raise RuntimeError(f"the backup failed its integrity check ({verdict[:80]})")
     os.chmod(tmp, 0o600)                                   # it holds the same secrets as the live database
     tmp.replace(target)
-    for f in sorted(_backup_dir().glob("hub-*.sqlite"))[:-KEEP_BACKUPS]:
+    for f in sorted(_backup_dir().glob(BACKUP_GLOB))[:-KEEP_BACKUPS]:
         f.unlink(missing_ok=True)
-    return {"file": target.name, "bytes": target.stat().st_size, "kept": len(list(_backup_dir().glob("hub-*.sqlite")))}
+    return {"file": target.name, "bytes": target.stat().st_size, "kept": len(list(_backup_dir().glob(BACKUP_GLOB)))}
 
 
 class BackupJob(Job):
@@ -88,7 +89,9 @@ class BackupJob(Job):
 
 
 # Items that haven't been seen for this long are forgotten (pinned ones never are). Widgets also trim as they run; this is the safety net.
-PRUNE_DAYS = {"release": 400, "radar": 30, "news": 45, "vinyl": 120}
+# News isn't here: each News section keeps its stories for its own number of days (widgets/news.py), and a fixed number
+# here would quietly undercut that.
+PRUNE_DAYS = {"release": 400, "radar": 30, "vinyl": 120}
 
 
 def _do_tidy() -> dict[str, int]:

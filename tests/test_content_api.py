@@ -213,7 +213,8 @@ def test_every_content_widget_is_in_the_dashboard_state(owner_client):
     w = owner_client.get(f"{BASE}/state").json()["widgets"]
     assert {"gigs", "releases", "vinyl", "radar", "news"} <= set(w)
     assert w["radar"]["configured"] is False and w["radar"]["data"] is None                          # no Ticketmaster key yet
-    assert w["releases"]["data"]["following"] == 0 and w["news"]["data"]["items"] == []
+    assert w["releases"]["data"]["following"] == 0 and w["news"]["data"] == {"feeds": {}, "errors": []}
+    assert "items" not in (w["mostread"]["data"] or {})                                            # headlines never ride along in the dashboard state
 
 
 def test_the_api_keys_are_write_only(owner_client):

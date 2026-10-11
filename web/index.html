@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/static/css/components.css">
 <link rel="stylesheet" href="/static/css/dashboard.css">
 <link rel="stylesheet" href="/static/css/music.css">
+<link rel="stylesheet" href="/static/css/news.css">
 </head>
 <body>
 <div class="sweep"></div>
@@ -31,7 +32,7 @@
   <main class="main">
     <header class="top">
       <div class="top__brand"><span class="wordmark">Citadel</span><span class="hud" id="host-label"></span></div>
-      <nav class="shortcuts" id="shortcuts" aria-label="Shortcuts" hidden></nav>
+      <div class="top__mid"><nav class="shortcuts" id="shortcuts" aria-label="Shortcuts" hidden></nav><section class="mu-bar" id="mu-bar" aria-label="Now playing"></section></div>
       <div class="top__right"><a class="btn btn--icon top__settings" href="/settings" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></a><button class="btn btn--icon theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Switch to light theme" title="Toggle light/dark theme"><svg class="i"><use href="#i-sun"/></svg></button><span class="hud hud--plain badge-role"><span class="dot" id="conn-dot" title="connecting…"></span><span id="device-label">Owner device</span></span></div>
     </header>
     <section class="view is-active" id="view-home" data-view="home">

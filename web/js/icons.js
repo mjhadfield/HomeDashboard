@@ -57,6 +57,8 @@ const paths = {
   link:   '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
   dock:   '<path d="M4 14h16v6H4zM8 9l4-4 4 4M12 5v8"/>',
   minus:  '<path d="M5 12h14"/>',
+  thumbup:  '<path d="M7 11v9H4v-9zM7 11l4-8a2 2 0 0 1 2.6 1.4L13 9h5.5a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.3 20H7"/>',
+  thumbdown:'<path d="M7 13V4H4v9zM7 13l4 8a2 2 0 0 0 2.6-1.4L13 15h5.5a2 2 0 0 0 2-2.3l-1.2-7A2 2 0 0 0 17.3 4H7"/>',
   bag:    '<path d="M6 8h12l1 12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM9 8V6a3 3 0 0 1 6 0v2"/>',
 };
 

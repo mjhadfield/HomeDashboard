@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import api_content, api_maintenance, api_music, api_owner, api_screens, auth, config, content, coverart, db, logbook, maintenance, monitor, musicbrainz, notify, procs, seed, state
+from . import api_content, api_maintenance, api_music, api_news, api_owner, api_screens, auth, config, content, coverart, db, logbook, maintenance, monitor, musicbrainz, notify, procs, seed, state
 from .health import Health
 from .music import store as music_store
 from .music.rotator import Rotator
@@ -33,11 +33,13 @@ for _noisy in ("httpx", "httpcore"):
 # frame-src is Jellyfin (Media page), Music Companion (Companion page), the Music DB Explorer (SQL DB page) and
 # Odysseus (Odysseus page, :7011 — its own framing rules are widened for Citadel by a proxy in ~/Projects/Odysseus) —
 # fixed addresses, hardcoded here the same way the image hosts above are; if any changes in Settings, this needs
-# a matching edit. i.scdn.co is Spotify's artwork CDN (the Music page's player bar). :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
+# a matching edit. i.scdn.co is Spotify's artwork CDN (the Music page's player bar). The last seven image hosts are the News
+# page's story pictures (widgets/news.py IMAGE_HOSTS keeps only pictures from these). :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
 # own pages ever creates an iframe pointed at it directly -- Companion's own settings-icon link navigates the
 # *existing* #music-frame iframe to it, and frame-src also governs subsequent navigations of a nested browsing
 # context, not just its initial src.
-CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co; "
+CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co "
+       "https://ichef.bbci.co.uk https://i.guim.co.uk https://e3.365dm.com https://cdn.arstechnica.net https://www.newscientist.com https://www.quantamagazine.org https://www.sciencenews.org; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644 http://192.168.0.66:7011; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
@@ -244,6 +246,7 @@ app.include_router(api_owner.router)
 app.include_router(api_maintenance.router)
 app.include_router(api_content.router)
 app.include_router(api_music.router)
+app.include_router(api_news.router)
 app.include_router(api_music.public)
 app.include_router(api_screens.public)
 app.include_router(api_screens.kiosk)

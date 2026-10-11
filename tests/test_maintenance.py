@@ -357,6 +357,18 @@ def test_the_backup_is_a_consistent_checked_copy_and_only_the_last_seven_are_kep
     assert not list((tmp_path / "backups").glob("*.tmp"))
 
 
+def test_trimming_old_backups_leaves_hand_made_snapshots_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    snapshots = [f"hub-before-change-{n}.sqlite" for n in range(9)]       # more than KEEP_BACKUPS, and they sort after the dated ones
+    for name in snapshots:
+        (backups / name).write_bytes(b"")
+    out = maintenance._do_backup("2026-10-10")
+    assert out["file"] == "hub-2026-10-10.sqlite" and out["kept"] == 1 and (backups / out["file"]).exists()
+    assert all((backups / name).exists() for name in snapshots)
+
+
 def test_a_corrupt_backup_is_refused_not_kept(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(maintenance, "_quick_check", lambda path: "*** in database main ***")
@@ -368,16 +380,16 @@ def test_a_corrupt_backup_is_refused_not_kept(tmp_path, monkeypatch):
 def test_tidying_removes_old_log_entries_stale_items_and_expired_links_but_never_pins():
     now = int(time.time())
     logbook.record("info", "x", "ancient", at=now - 60 * 86400)
-    content.upsert_items("news", "f", [{"external_id": "old", "artist": None, "title": "Old story", "date": "2026-01-01"},
-                                        {"external_id": "kept", "artist": None, "title": "Pinned old story", "date": "2026-01-01"}], baseline=True)
-    kept = next(i["id"] for i in content.list_items("news")["items"] if i["title"] == "Pinned old story")
+    content.upsert_items("radar", "f", [{"external_id": "old", "artist": None, "title": "Old story", "date": "2026-01-01"},
+                                         {"external_id": "kept", "artist": None, "title": "Pinned old story", "date": "2026-01-01"}], baseline=True)
+    kept = next(i["id"] for i in content.list_items("radar")["items"] if i["title"] == "Pinned old story")
     content.set_status(kept, "pinned")
     with db.db() as con:
         con.execute("UPDATE feed_items SET last_seen = ?", (now - 90 * 86400,))
         con.execute("INSERT INTO enrol_tokens (token_hash, role, name, expires_at, used) VALUES ('h', 'owner', 't', ?, 0)", (now - 3600,))
     out = maintenance._do_tidy()
     assert out["log_entries"] == 1 and out["items"] == 1 and out["expired_links"] >= 1
-    assert [i["title"] for i in content.list_items("news")["items"]] == ["Pinned old story"]
+    assert [i["title"] for i in content.list_items("radar")["items"]] == ["Pinned old story"]
 
 
 def test_the_daily_check_flags_failing_and_stale_integrations_and_stays_quiet_otherwise(monkeypatch, tmp_path):
@@ -418,8 +430,8 @@ def test_the_data_syncs_are_daily_and_staggered_and_the_local_ones_are_marked():
     ws = discover()
     times = {wid: schedule_of(w) for wid, w in ws.items()}
     daily = {wid: t["at"] for wid, t in times.items() if t["mode"] == "daily"}
-    assert daily == {"bins": "03:00", "releases": "04:00", "vinyl": "04:30", "radar": "05:00", "shortcuts": "05:45"}   # one at a time, well apart, in the small hours
-    assert times["news"] == {"mode": "every", "seconds": 3 * 3600} and times["diary"] == {"mode": "every", "seconds": 1800}
+    assert daily == {"bins": "03:00", "releases": "04:00", "vinyl": "04:30", "radar": "05:00", "f1cal": "05:30", "shortcuts": "05:45"}   # one at a time, well apart, in the small hours
+    assert times["news"] == {"mode": "every", "seconds": 3600} and times["mostread"] == {"mode": "every", "seconds": 3600} and times["diary"] == {"mode": "every", "seconds": 1800}
     assert {wid for wid, w in ws.items() if w.local} == {"gigs", "system"}
     assert all(ws[w].min_interval >= 6 * 3600 for w in ("releases", "vinyl", "radar"))                          # never let anyone poll the heavy ones hourly
 

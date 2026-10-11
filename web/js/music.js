@@ -1,5 +1,5 @@
 // The Music page (#listen): playlists Citadel designs and keeps on Spotify, Discover, gig setlists, full-page Releases
-// and Vinyl radar, and a player bar that steers Spotify (the desktop app, a phone…). app.js tells this module when the
+// and Vinyl radar, and a player bar that steers Spotify (the desktop app, a phone…) — on a computer it sits in the header. app.js tells this module when the
 // page is shown (onView) and hands over each fresh dashboard state (onState) — Releases/Vinyl render from that, exactly
 // as Home's cards do. Everything else comes from /api/owner/music, and a 'music' event says when to look again.
 //
@@ -12,6 +12,7 @@ import { musicRowWith, vinylRowWith, preorderRowWith, narrow } from './content-c
 
 const API = '/api/owner/music';
 const root = $('#view-listen');
+const barEl = $('#mu-bar');   // the player: in the header (index.html), not in the page — see music.css
 const TABS = [['playlists', 'Playlists', 'list'], ['discover', 'Discover', 'spark'], ['rediscover', 'Rediscover', 'history'], ['gigs', 'Gigs', 'bolt'], ['releases', 'Releases', 'disc'], ['vinyl', 'Vinyl', 'radar'], ['buying', 'Worth buying', 'bag']];
 const SRC_LABEL = { history: 'history', shelf: 'shelf', deep: 'deep cut', gig: 'setlist', new: 'new release', similar: 'last.fm', related: 'musicbrainz', tag: 'last.fm tag' };
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -37,7 +38,7 @@ const rel = { filter: 'all', search: '' }, vin = { mode: 'radar', filter: 'all' 
 let buy = null, buyShow = store.get('mu-buy', 'deals');   // GET /buying; show albums with a deal, or all
 let bar = ['full', 'compact', 'hidden'].includes(store.get('mu-bar')) ? store.get('mu-bar') : 'full';
 let pl = null, plAt = 0, devMenu = null;                     // player state, when it was read, open device menu
-let es = null;
+let streamDown = false;     // the event stream dropped (or a hidden tab let go of it): re-fetch when it's back
 
 // ---- helpers ----------------------------------------------------------------------------------------------------------
 const hash = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
@@ -47,7 +48,9 @@ function art(name, img, cls = '') {
   const n = String(name || '?');
   return `<span class="art ${ART[Math.abs(hash(n)) % 4]} ${cls}">${esc(n.replace(/^the\s+/i, '')[0] || '?')}${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>`;
 }
-root.addEventListener('error', e => { if (e.target.tagName === 'IMG' && e.target.closest('.art')) e.target.remove(); }, true);
+const dropBrokenArt = e => { if (e.target.tagName === 'IMG' && e.target.closest('.art')) e.target.remove(); };
+root.addEventListener('error', dropBrokenArt, true);
+barEl.addEventListener('error', dropBrokenArt, true);
 const mmss = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const ord = n => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 const plays = n => `${Number(n).toLocaleString()} play${n === 1 ? '' : 's'}`;
@@ -83,8 +86,7 @@ export function onView(view) {
 async function boot() {
   root.innerHTML = `<div class="mu" data-bar="${bar}"><div class="mu__top"><nav class="mtabs" aria-label="Music sections">${TABS.map(([id, label, icon]) =>
     `<button type="button" data-mu-tab="${id}" aria-pressed="${id === tab}">${ico(icon)}${label}</button>`).join('')}</nav><span class="mu-status" id="mu-status"></span></div>
-    <div id="mu-banner"></div><div class="mu__panel" id="mu-panel"><div class="mu-empty"><span class="spin"></span></div></div>
-    <footer class="mu-bar" id="mu-bar" aria-label="Now playing"></footer></div>`;
+    <div id="mu-banner"></div><div class="mu__panel" id="mu-panel"><div class="mu-empty"><span class="spin"></span></div></div></div>`;
   await loadOverview();
   if (selected && !ov.playlists.some(p => p.id === selected)) selected = null;
   selected ??= ov.playlists[0]?.id ?? null;
@@ -93,8 +95,9 @@ async function boot() {
   pollPlayer();
   setInterval(tickProgress, 1000);
   document.addEventListener('visibilitychange', () => { if (active && !document.hidden) pollPlayer(); });
-  es = new EventSource('/api/owner/events');
-  es.addEventListener('music', e => { let d = {}; try { d = JSON.parse(e.data); } catch { /* fine */ } onMusicEvent(d.what); });
+  // app.js's stream, shared (api.subscribe) — a second one per tab used up the browser's six connections to Citadel
+  api.subscribe(e => { let d = {}; try { d = JSON.parse(e.data); } catch { /* fine */ } onMusicEvent(d.what); },
+    ok => { if (!ok) streamDown = true; else if (streamDown) { streamDown = false; onMusicEvent('resync'); } }, '/api/owner/events', ['music']);
 }
 
 let evTimer;
@@ -103,6 +106,10 @@ function onMusicEvent(what) {
   evTimer = setTimeout(async () => {
     if (what === 'discover') { if (tab === 'discover') await loadDiscover(); return; }
     if (what === 'buying') { if (tab === 'buying') await loadBuying(); return; }
+    if (what === 'resync') {                       // back after missing events: whatever's on screen may be stale
+      if (tab === 'discover') loadDiscover(); else if (tab === 'buying') loadBuying();
+      else if (tab === 'gigs') loadGigs(); else if (tab === 'rediscover') loadRediscover();
+    }
     await loadOverview();
     if (what === 'playlists' && cur && !editingNow()) { await loadPlaylist(cur.id, false); if (tab === 'playlists') renderPreview(); }
     renderTop();
@@ -146,9 +153,9 @@ function renderPanel() {
   $$('[data-mu-tab]', root).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.muTab === tab)));
   const panel = $('#mu-panel');
   if (tab === 'playlists') panel.innerHTML = playlistsHtml();
-  else if (tab === 'discover') { panel.innerHTML = discoverHtml(); if (!disc.data) loadDiscover(); }
-  else if (tab === 'rediscover') { panel.innerHTML = rediscoverHtml(); if (!redis) loadRediscover(); }
-  else if (tab === 'gigs') { panel.innerHTML = gigsHtml(); if (!gigsData) loadGigs(); }
+  else if (tab === 'discover') { panel.innerHTML = discoverHtml(); if (!disc.data || disc.data.failed) loadDiscover(); }
+  else if (tab === 'rediscover') { panel.innerHTML = rediscoverHtml(); if (!redis || redis.failed) loadRediscover(); }
+  else if (tab === 'gigs') { panel.innerHTML = gigsHtml(); if (!gigsData || gigsData.failed) loadGigs(); }
   else if (tab === 'releases') { panel.innerHTML = releasesHtml(); shelfBadges(panel); }
   else if (tab === 'buying') { panel.innerHTML = buyingHtml(); loadBuying(); }
   else { panel.innerHTML = vinylHtml(); shelfBadges(panel); }
@@ -341,9 +348,13 @@ async function build(btn, msg) {
   toast(r.errors.length ? `Built ${r.tracks} tracks — ${r.errors.join('; ')}` : msg || `Built ${r.tracks} tracks${r.missing && spotifyReady() ? `, ${r.missing} not on Spotify` : ''} — nothing changes on Spotify until you save`);
 }
 
+/** A tab whose data didn't arrive: say so, with a way to try again (never an endless spinner). */
+const failedHtml = (msg, what) => `<div class="mu-empty">${ico('alert')}<b>Couldn’t load this</b>${esc(msg || 'Citadel didn’t answer')}<br>
+  <button class="btn btn--go" type="button" data-mu-retry="${what}">${ico('refresh')}Try again</button></div>`;
+
 // ---- Discover --------------------------------------------------------------------------------------------------------------
 async function loadDiscover() {
-  try { disc.data = await api.get(`${API}/discover?basis=${encodeURIComponent(disc.basis)}`); } catch (e) { toast(e.message); return; }
+  try { disc.data = await api.get(`${API}/discover?basis=${encodeURIComponent(disc.basis)}`); } catch (e) { disc.data = { failed: e.message }; }
   if (tab === 'discover') $('#mu-panel').innerHTML = discoverHtml();
 }
 
@@ -355,6 +366,7 @@ function discoverHtml() {
       <select class="fld" data-mu-basis aria-label="Based on">${opt(Object.entries(bases).map(([k, v]) => [k, `Based on: ${v}`]), disc.basis)}</select>
       <button class="btn" type="button" data-mu-drefresh${d?.running ? ' disabled' : ''}>${ico('refresh')}Refresh</button></span></div>`;
   if (!d) return head + '<div class="mu-empty"><span class="spin"></span></div>';
+  if (d.failed) return head + failedHtml(d.failed, 'discover');
   const errs = d.result?.errors?.length ? `<p class="err-line">${esc(d.result.errors.join(' · '))}</p>` : '';
   const empty = what => `<div class="mu-empty">${ico('spark')}<b>${d.running ? 'Finding artists…' : d.result ? what : 'Not worked out yet'}</b>${d.running ? 'This takes a few minutes the first time.' : d.result ? 'Try a different basis, or Refresh.' : ''}</div>`;
   if (disc.filter === 'vibe') {
@@ -389,12 +401,13 @@ function discTile(a) {
 
 // ---- Rediscover: artists you played far more than you do now ------------------------------------------------------------
 async function loadRediscover() {
-  try { redis = await api.get(`${API}/rediscover`); } catch (e) { toast(e.message); return; }
+  try { redis = await api.get(`${API}/rediscover`); } catch (e) { redis = { failed: e.message }; }
   if (tab === 'rediscover') $('#mu-panel').innerHTML = rediscoverHtml();
 }
 
 function rediscoverHtml() {
   if (!redis) return '<div class="mu-empty"><span class="spin"></span></div>';
+  if (redis.failed) return failedHtml(redis.failed, 'rediscover');
   if (!redis.artists.length) {
     return `<div class="mu-empty">${ico('history')}<b>${redis.available ? 'Nobody to rediscover' : 'Music Companion’s database wasn’t found'}</b>${redis.available ? 'Everyone you used to play a lot, you still do.' : ''}</div>`;
   }
@@ -411,7 +424,7 @@ function rediscoverHtml() {
 
 // ---- Gigs -------------------------------------------------------------------------------------------------------------------
 async function loadGigs() {
-  try { gigsData = await api.get(`${API}/gigs`); } catch (e) { toast(e.message); return; }
+  try { gigsData = await api.get(`${API}/gigs`); } catch (e) { gigsData = { failed: e.message }; if (tab === 'gigs') $('#mu-panel').innerHTML = gigsHtml(); return; }
   gigSel ??= gigsData.booked[0]?.id ?? null;
   const g = gigsData.booked.find(x => x.id === gigSel);
   if (g) predict(g.artist);
@@ -431,6 +444,7 @@ const datebox = iso => { const [y, m, d] = iso.split('-'); return `<span class="
 
 function gigsHtml() {
   if (!gigsData) return '<div class="mu-empty"><span class="spin"></span></div>';
+  if (gigsData.failed) return failedHtml(gigsData.failed, 'gigs');
   const g = gigsData.booked.find(x => x.id === gigSel);
   let hero;
   if (!g) {
@@ -515,7 +529,7 @@ function vinylHtml() {
 
 // ---- Worth buying: albums you play a lot but don't own, from the Discogs marketplace (app/music/buying.py) ----------------
 async function loadBuying() {
-  try { buy = await api.get(`${API}/buying`); } catch (e) { toast(e.message); return; }
+  try { buy = await api.get(`${API}/buying`); } catch (e) { buy = { failed: e.message }; }
   if (tab === 'buying') $('#mu-panel').innerHTML = buyingHtml();
 }
 
@@ -556,6 +570,7 @@ function skippedNote(sk) {
 function buyingHtml() {
   const card = inner => `<section class="card mcard mu-full" id="mu-buying"><div class="card__in">${inner}</div></section>`;
   if (!buy) return card(`<div class="mu-empty"><span class="spin"></span></div>`);
+  if (buy.failed) return card(failedHtml(buy.failed, 'buying'));
   if (!buy.ready) return card(`<div class="mu-empty">${ico('bag')}<b>Connect Discogs</b>Add a Discogs personal access token in Settings → Music page, and Citadel will look for good prices on the albums you play most but don’t own on vinyl.<br><a class="btn btn--go" href="/settings#listen">Set up Discogs</a></div>`);
   const retry = label => buy.running ? `<span class="meta"><span class="spin"></span> Checking prices…</span>`
     : `<button class="btn btn--go" type="button" data-mu-brefresh>${ico('refresh')}<span class="bl">${label}</span></button>`;
@@ -624,8 +639,8 @@ function sizer() {
 }
 
 function renderBar() {
-  const el = $('#mu-bar'); if (!el) return;
-  $('.mu', root).dataset.bar = bar;
+  const el = barEl;
+  el.dataset.bar = bar; $('.mu', root).dataset.bar = bar;      // sizes are a phone thing (music.css); a computer ignores them
   el.classList.remove('mu-bar--msg');
   if (!pl) { el.innerHTML = ''; return; }
   if (!pl.ready || !pl.active) {
@@ -639,7 +654,7 @@ function renderBar() {
   }
   const t = pl.track, pos = Math.min(t.duration, pl.progress + (pl.playing ? Date.now() - plAt : 0));
   el.style.setProperty('--p', `${t.duration ? pos / t.duration * 100 : 0}%`);
-  el.innerHTML = `<div class="np">${art(t.artists[0] || t.name, t.image, t.image ? 'art--sp' : '')}<div class="np__main"><div class="np__t">${t.url ? `<a href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener">${esc(t.name)}</a>` : esc(t.name)}</div>
+  el.innerHTML = `<div class="np">${art(t.artists[0] || t.name, t.image, t.image ? 'art--sp' : '')}<div class="np__main"${pl.fact ? ` title="${esc(pl.fact)}"` : ''}><div class="np__t">${t.url ? `<a href="${esc(safeUrl(t.url))}" target="_blank" rel="noopener">${esc(t.name)}</a>` : esc(t.name)}</div>
       <div class="np__a">${esc(t.artists.join(', '))}${t.album ? ` · ${esc(t.album)}` : ''}</div>${pl.fact ? `<div class="np__fact">${esc(pl.fact)}</div>` : ''}${spotifyMark(t.url)}</div>
       <button class="btn btn--icon${pl.liked ? ' is-on' : ''}" type="button" data-mu-cmd="like" data-value="${!pl.liked}" title="${pl.liked ? 'Remove from' : 'Save to'} your library">${ico('heart')}</button>${spotifyMark(t.url, 'side__sp')}</div>
     <div class="ctl"><div class="ctl__b">
@@ -677,7 +692,7 @@ async function playWhat(body, label) {
 }
 
 // ---- events ---------------------------------------------------------------------------------------------------------------
-root.addEventListener('click', async e => {
+async function onClick(e) {
   const b = e.target.closest('button, [data-mu-seek]');
   if (!b) { if (!e.target.closest('.addmenu, .dev')) closeMenus(); return; }
   const d = b.dataset;
@@ -763,6 +778,10 @@ root.addEventListener('click', async e => {
   }
   // gigs
   if (d.muGig) { gigSel = Number(d.muGig); const g = gigsData.booked.find(x => x.id === gigSel); $('#mu-panel').innerHTML = gigsHtml(); predict(g.artist); return; }
+  if (d.muRetry) {                                                   // back to the spinner; renderPanel loads it again
+    if (d.muRetry === 'discover') disc.data = null; else if (d.muRetry === 'rediscover') redis = null; else if (d.muRetry === 'gigs') gigsData = null; else buy = null;
+    renderPanel(); return;
+  }
   if ('muRepredict' in d) { const g = gigsData.booked.find(x => x.id === gigSel); predict(g.artist, true); return; }
   if (d.muPregig) {
     busy(b, true);
@@ -821,7 +840,9 @@ root.addEventListener('click', async e => {
     const r = b.getBoundingClientRect();
     command('seek', Math.round((e.clientX - r.left) / r.width * pl.track.duration));
   }
-});
+}
+root.addEventListener('click', onClick);
+barEl.addEventListener('click', onClick);
 
 function closeMenus() { $$('.addmenu__list', root).forEach(m => m.remove()); if (devMenu) { devMenu = null; renderBar(); } }
 
@@ -850,12 +871,14 @@ root.addEventListener('submit', e => {
 });
 
 let volTimer;
+barEl.addEventListener('input', e => {
+  if (e.target.dataset.muVol !== undefined) { clearTimeout(volTimer); volTimer = setTimeout(() => command('volume', Number(e.target.value)), 250); }
+});
 root.addEventListener('input', e => {
   const el = e.target, d = el.dataset;
   if (d.muField === 'name') { cur.name = el.value; designChanged(); return; }
   if (d.muShare !== undefined) { cur.ings[Number(d.muShare)].share = Number(el.value); el.nextElementSibling.textContent = `${el.value}%`; designChanged(); return; }
   if (d.muRule === 'fam') { cur.rules.fam = Number(el.value); $('#mu-famlbl').textContent = `· ${cur.rules.fam >= 90 ? 'all familiar' : cur.rules.fam <= 10 ? 'all new to you' : `${cur.rules.fam}% familiar`}`; designChanged(); return; }
-  if (d.muVol !== undefined) { clearTimeout(volTimer); volTimer = setTimeout(() => command('volume', Number(el.value)), 250); return; }
   if (d.muRsearch !== undefined) { rel.search = el.value.trim().toLowerCase(); clearTimeout(volTimer); volTimer = setTimeout(() => { renderPanel(); const box = $('[data-mu-rsearch]', root); box?.focus(); box?.setSelectionRange(box.value.length, box.value.length); }, 250); }
 });
 

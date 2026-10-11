@@ -58,14 +58,23 @@ def purge_junk() -> int:
 
 # ---- items ---------------------------------------------------------------------------------------------------
 
+# Things the *person* set on an item (opened it, voted on it, chose to see a spoiler) rather than the source: a refresh
+# rewrites the rest of `meta` but carries these over, so they're never silently lost while a story is still in its feed.
+STICKY_META = ("read", "vote", "revealed")
+
+
 def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baseline: bool) -> int:
     """Store items. New rows start 'seen' when `baseline` (first look at that artist) else 'new'.
-    Existing rows are refreshed but keep their status. Returns how many were newly inserted."""
+    Existing rows are refreshed but keep their status (and STICKY_META). Returns how many were newly inserted."""
     now = int(time.time())
     inserted = 0
     with db() as con:
         for it in items:
-            exists = con.execute("SELECT 1 FROM feed_items WHERE kind = ? AND source = ? AND external_id = ?", (kind, source, it["external_id"])).fetchone()
+            exists = con.execute("SELECT meta FROM feed_items WHERE kind = ? AND source = ? AND external_id = ?", (kind, source, it["external_id"])).fetchone()
+            meta = dict(it.get("meta") or {})
+            if exists:
+                old = json.loads(exists["meta"] or "{}")
+                meta.update({k: old[k] for k in STICKY_META if k in old})
             con.execute(
                 "INSERT INTO feed_items (kind, source, external_id, artist, title, subtitle, url, date, meta, status, first_seen, last_seen) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -73,17 +82,27 @@ def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baselin
                 "url = excluded.url, date = CASE WHEN feed_items.date_set = 1 THEN feed_items.date ELSE excluded.date END, "   # a hand-set date wins
                 "meta = excluded.meta, last_seen = excluded.last_seen",
                 (kind, source, it["external_id"], it.get("artist"), it["title"][:300], (it.get("subtitle") or "")[:300], it.get("url"), it.get("date"),
-                 json.dumps(it.get("meta") or {}), "seen" if baseline else "new", now, now),
+                 json.dumps(meta), "seen" if baseline else "new", now, now),
             )
             inserted += 0 if exists else 1
     return inserted
 
 
-def prune(kind: str, *, older_than_days: int) -> int:
-    """Forget items we haven't seen for a while — except pinned or purchased ones."""
+def prune(kind: str, *, older_than_days: int, sources: list[str] | None = None, keep_liked: bool = False) -> int:
+    """Forget items we haven't seen for a while — except pinned or purchased ones (and, with keep_liked, ones voted 👍).
+    `sources` limits it to those sources: News keeps each section for as long as that section says."""
     cutoff = int(time.time()) - older_than_days * 86400
+    sql = "DELETE FROM feed_items WHERE kind = ? AND last_seen < ? AND status NOT IN ('pinned', 'purchased')"
+    args: list[Any] = [kind, cutoff]
+    if sources is not None:
+        if not sources:
+            return 0
+        sql += f" AND source IN ({','.join('?' * len(sources))})"
+        args += sources
+    if keep_liked:
+        sql += " AND COALESCE(json_extract(meta, '$.vote'), 0) != 1"
     with db() as con:
-        return con.execute("DELETE FROM feed_items WHERE kind = ? AND last_seen < ? AND status NOT IN ('pinned', 'purchased')", (kind, cutoff)).rowcount
+        return con.execute(sql, args).rowcount
 
 
 def has_source(kind: str, source: str) -> bool:

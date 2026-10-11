@@ -13,6 +13,7 @@ let tab = TABS.some(t => t[0] === location.hash.slice(1)) ? location.hash.slice(
 let editing = null;                     // {kind:'link'|'project', id} | {kind, id:'new'}
 let enrol = null;                       // last generated enrolment link
 let musicCfg = null, musicLink = null;   // the Music page's settings (GET /api/owner/music) and the last Spotify login link
+let newsExtra = { learning: null, f1: null };   // the News page's learned topics + rules, and its F1 shield's status
 const svcTests = {};                    // service id -> {ok, message} from its Test button
 
 // A dashboard card can link straight to "add one of these" (e.g. Next gig's small + button) with ?add=<kind>,
@@ -123,11 +124,13 @@ function projectsTab() {
 }
 
 // ---- Widgets ----------------------------------------------------------------------------------------------------
-function statusLine(w, id = '') {
+/** `label` names what synced, for a card with more than one ("Most read: synced 14:05"). */
+function statusLine(w, id = '', label = '') {
   if (!w) return '';
-  if (w.error) return `<div class="status-line status-line--err"${id ? ` data-status="${id}"` : ''}><span class="dot dot--bad"></span>Last refresh failed: ${esc(w.error)}${w.fetched_at ? ` — showing data from ${esc(hhmm(w.fetched_at))}` : ''}</div>`;
-  if (w.fetched_at) return `<div class="status-line"${id ? ` data-status="${id}"` : ''}><span class="dot dot--ok"></span>Synced ${esc(hhmm(w.fetched_at))}</div>`;
-  return `<div class="status-line"${id ? ` data-status="${id}"` : ''}><span class="dot"></span>${w.configured ? 'Waiting for the first sync…' : 'Not set up yet'}</div>`;
+  const attrs = `${id ? ` data-status="${id}"` : ''}${label ? ` data-label="${esc(label)}"` : ''}`, pre = label ? `${esc(label)}: ` : '';
+  if (w.error) return `<div class="status-line status-line--err"${attrs}><span class="dot dot--bad"></span>${pre}Last refresh failed: ${esc(w.error)}${w.fetched_at ? ` — showing data from ${esc(hhmm(w.fetched_at))}` : ''}</div>`;
+  if (w.fetched_at) return `<div class="status-line"${attrs}><span class="dot dot--ok"></span>${pre}${label ? 'synced' : 'Synced'} ${esc(hhmm(w.fetched_at))}</div>`;
+  return `<div class="status-line"${attrs}><span class="dot"></span>${pre}${w.configured ? 'Waiting for the first sync…' : 'Not set up yet'}</div>`;
 }
 
 // ---- Shortcuts: the row of web links across the top of the dashboard --------------------------------------------
@@ -290,31 +293,114 @@ function radarCard() {
       </div><div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="radar"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
-const feedRow = (f = {}) => {
-  const custom = (f.include?.length || f.exclude?.length);
-  return `<div class="feedcfg" data-feed data-id="${esc(f.id || '')}">
-  ${input('f_name', f.name || '', 'placeholder="Name" maxlength="40" aria-label="Feed name"')}${input('f_url', f.url || '', 'type="url" placeholder="https://…/feed" aria-label="Feed address"')}
-  ${check('f_on', 'On', f.enabled !== false)}${act('remove-feed', 'Remove', '', 'btn--danger')}
-  <details class="feedcfg__filter"${custom ? ' open' : ''}><summary>Filtering${custom ? ' <span class="chip chip--new">custom</span>' : ''}</summary>
-    <div class="form-grid">
-      ${field('Only show (overrides the global list, this feed only)', `<textarea class="input" name="f_include" rows="3" spellcheck="false" placeholder="Leave empty to use the global list">${esc((f.include || []).join('\n'))}</textarea>`)}
-      ${field('Hide (overrides the global list, this feed only)', `<textarea class="input" name="f_exclude" rows="3" spellcheck="false" placeholder="Leave empty to use the global list">${esc((f.exclude || []).join('\n'))}</textarea>`)}
-    </div></details></div>`;
-};
+// ---- News: front page, F1 spoiler shield, what it's learned, sections and their feeds -------------------------------------
+const lines = text => String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+const shortGp = name => String(name || '').replace(/ Grand Prix.*/, ' GP');
+const when = epoch => new Date(epoch * 1000).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-function newsSettingsCard() {
+function newsFrontCard() {
   const s = cfg.widgets.news.settings;
-  const feedErrors = live?.news?.data?.errors || [];
-  const errNote = feedErrors.length ? `<div class="status-line status-line--err">⚠ Some feeds couldn't be read last sync: ${esc(feedErrors.join(', '))}</div>` : '';
-  return card('Headlines — RSS feeds', 'A feed’s own <b>Filtering</b> replaces the lists below for that feed.',
-    `${statusLine(live?.news, 'news')}${errNote}<form class="form" data-form="news" style="padding:0 18px 12px">
-      <div id="feeds">${s.feeds.map(feedRow).join('')}</div>
-      <div class="bar-actions" style="padding:10px 0 4px">${act('add-feed', `${ico('play')}Add feed`, '', 'btn--go')}</div>
-      <div class="form-grid" style="margin-top:8px">
-        ${field('Only show stories mentioning (one per line)', `<textarea class="input" name="include" rows="4" spellcheck="false" placeholder="e.g. vinyl&#10;tour&#10;reissue">${esc(s.include.join('\n'))}</textarea>`, 'Empty = show everything.')}
-        ${field('Hide stories mentioning (one per line)', `<textarea class="input" name="exclude" rows="4" spellcheck="false" placeholder="e.g. kardashian">${esc(s.exclude.join('\n'))}</textarea>`)}
-        ${field('Keep stories for (days)', input('max_age_days', s.max_age_days, 'type="number" min="3" max="180"'))}
+  return card('News — front page', 'What the <a href="/#news">News page</a> opens on: the BBC’s <b>Most read</b> top 10 beside each section’s lead stories. Each section’s own tab shows its latest stories, with near-duplicates from different outlets merged into one.',
+    `${statusLine(live?.news, 'news', 'Feeds')}${statusLine(live?.mostread, 'mostread', 'Most read')}<form class="form" data-form="news-front" style="padding:0 18px 12px">
+      <div class="checks">${check('most_read', 'Show the BBC’s Most read top 10', s.most_read, 'Read from bbc.co.uk once an hour.')}</div>
+      <div class="form-grid">
+        ${field('Stories per section on the front page', select('front_per_section', [2, 3, 4, 5, 6, 8], s.front_per_section))}
+        ${field('A section’s “latest” covers', select('latest_hours', [[12, '12 hours'], [24, '24 hours'], [48, '2 days'], [72, '3 days'], [168, 'a week']], s.latest_hours))}
+        ${field('Stories shown per section', select('latest_cap', [10, 15, 20, 30, 40, 50], s.latest_cap), 'The rest are a click away in the Archive.')}
       </div><div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="news"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
+function newsShieldCard() {
+  const s = cfg.widgets.news.settings, f1 = newsExtra.f1;
+  if (!f1) return card('F1 spoiler shield', '', '<p class="sx__intro">Couldn’t load the shield’s status.</p>');
+  const sh = f1.shield || {};
+  const status = !f1.enabled ? '<div class="status-line"><span class="dot"></span>Off — F1 stories show as normal.</div>'
+    : sh.locked && sh.reason !== 'race' ? `<div class="status-line status-line--err"><span class="dot dot--warn"></span>On, hiding every F1-looking story: the calendar ${sh.reason === 'stale' ? 'is out of date' : 'hasn’t loaded yet'}.</div>`
+    : sh.locked ? `<div class="status-line status-line--err"><span class="dot dot--warn"></span>Locked: ${esc(sh.rounds.map(r => shortGp(r.name)).join(', '))} — F1 stories since ${esc(when(sh.since))} are hidden until you mark it watched.</div>`
+    : `<div class="status-line"><span class="dot dot--ok"></span>Ready${sh.next ? ` — locks at ${esc(shortGp(sh.next.name))} ${esc((sh.next.first_label || '').toLowerCase())}, ${esc(when(sh.next.first_session))}` : ''}.</div>`;
+  const now = Date.now() / 1000;
+  const started = (f1.rounds || []).filter(r => r.first_session && r.first_session <= now);
+  const watched = s.f1_watched && s.f1_watched.season === f1.season ? s.f1_watched.round : '';
+  const opts = [['', 'Not set — races over a week old count as watched'], [0, 'None this season yet'], ...started.map(r => [r.round, `Round ${r.round} · ${shortGp(r.name)} (${new Date(r.race * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })})`])];
+  return card('F1 spoiler shield', 'From each race weekend’s first session (sprint qualifying on a sprint weekend), F1 stories are hidden everywhere on the News page — Most read and the Archive included — until you say you’ve watched that race. Hidden headlines never even reach the browser. The calendar comes from the free <a href="https://api.jolpi.ca/" target="_blank" rel="noopener">Jolpica F1 API</a>, once a day.',
+    `${status}${statusLine(live?.f1cal, 'f1cal', 'Calendar')}<form class="form" data-form="news-f1" style="padding:0 18px 12px" data-season="${esc(f1.season ?? '')}">
+      <div class="checks">${check('f1_shield', 'Hide F1 spoilers', f1.enabled)}</div>
+      <div class="form-grid">
+        ${field('Watched up to', select('f1_watched', opts, watched), 'Or use “I’ve watched it” on the News page.')}
+        ${field('Also treat these as F1 (one per line)', `<textarea class="input" name="f1_extra_terms" rows="3" spellcheck="false" placeholder="e.g. Toto Wolff&#10;Silverstone">${esc((s.f1_extra_terms || []).join('\n'))}</textarea>`, 'Drivers, teams and the weekend’s venue are already known.')}
+      </div><div class="form-actions">${act('refresh-widget', 'Update calendar', 'data-id="f1cal"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
+function newsLearningCard() {
+  const L = newsExtra.learning;
+  if (!L) return '';
+  const kindName = { p: 'name', c: 'category', w: 'word', s: 'outlet' };
+  const max = Math.max(1, ...L.topics.map(t => Math.abs(t.weight)));
+  const topic = t => `<li class="lrn"><span class="lrn__label">${esc(t.label)} <small>${kindName[t.kind] || ''}</small></span>
+      <span class="lrn__bar"><i class="${t.weight > 0 ? 'up' : 'down'}" style="width:${Math.round(Math.abs(t.weight) / max * 100)}%"></i></span>
+      ${act('forget-topic', ico('x'), `data-key="${esc(t.key)}" aria-label="Forget ${esc(t.label)}" title="Forget this"`, 'btn--icon')}</li>`;
+  const liked = L.topics.filter(t => t.weight > 0).slice(0, 15), disliked = L.topics.filter(t => t.weight < 0).slice(0, 15);
+  const secName = id => cfg.widgets.news.settings.sections.find(x => x.id === id)?.name || id;
+  const rules = L.rules.map(r => `<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div class="item__main"><b>${esc(r.term)}</b>${r.kind === 'source' ? '<span class="chip">outlet</span>' : ''}<span class="chip">${r.section ? esc(secName(r.section)) : 'everywhere'}</span></div>
+      <div class="item__acts">${act('delete-rule', 'Remove', `data-id="${r.id}"`, 'btn--danger')}</div></li>`).join('');
+  const secOpts = [['', 'Everywhere'], ...cfg.widgets.news.settings.sections.map(x => [x.id, `Only in ${x.name}`])];
+  return card('What the News page has learned', 'Every 👍 or 👎 nudges the names, categories and words in that story (and a little, its outlet). Stories you’ve clearly gone off wait under “held back for you” on their section’s tab rather than disappearing. Old votes fade over a couple of months.',
+    `<div class="lrn-cols"><div><h4 class="lrn__h">More of</h4>${liked.length ? `<ul class="lrn-list">${liked.map(topic).join('')}</ul>` : '<p class="sx__intro">Nothing yet — 👍 a story you liked.</p>'}</div>
+      <div><h4 class="lrn__h">Less of</h4>${disliked.length ? `<ul class="lrn-list">${disliked.map(topic).join('')}</ul>` : '<p class="sx__intro">Nothing yet.</p>'}</div></div>
+     <h4 class="lrn__h" style="padding:6px 18px 0">Never show</h4><ul class="items">${rules || '<li class="item"><span class="dim">No rules yet. Add one here, or pick one after a 👎.</span></li>'}</ul>
+     <form class="form" data-form="news-rule" style="padding:0 18px 12px"><div class="form-grid">
+       ${field('Never show stories about', input('term', '', 'maxlength="60" placeholder="e.g. Love Island" required'))}
+       ${field('Where', select('section', secOpts, ''))}
+     </div><div class="form-actions">${L.topics.length ? act('reset-learning', 'Forget everything learned', '', 'btn--danger') : ''}<button class="btn btn--solid" type="submit">Add rule</button></div></form>`);
+}
+
+const feedStatus = id => {
+  const st = live?.news?.data?.feeds?.[id];
+  if (!st) return '';
+  return st.ok ? `<span class="feedcfg__st">✓ ${st.last24} in the last 24 h · ${st.items} in the feed</span>` : `<span class="feedcfg__st feedcfg__st--err">✗ ${esc(st.error)}</span>`;
+};
+const feedRow = (f = {}) => `<div class="feedcfg" data-feed data-id="${esc(f.id || '')}">
+  ${input('f_name', f.name || '', 'placeholder="Name" maxlength="40" aria-label="Feed name"')}${input('f_url', f.url || '', 'type="url" placeholder="https://…/feed" aria-label="Feed address"')}
+  ${check('f_on', 'On', f.enabled !== false)}<span class="feedcfg__acts">${act('test-feed', 'Test')}${act('remove-feed', 'Remove', '', 'btn--danger')}</span>
+  <div class="feedcfg__result">${f.id ? feedStatus(f.id) : ''}</div></div>`;
+
+function sectionBlock(sec, i, n) {
+  const s = cfg.widgets.news.settings;
+  const have = new Set(sec.feeds.map(f => f.url));
+  const sugg = (s.suggested[sec.id] || []).filter(f => !have.has(f.url));
+  return `<fieldset class="nsec" data-sec data-id="${esc(sec.id || '')}">
+    <div class="nsec__head">${input('s_name', sec.name || '', 'maxlength="30" placeholder="Section name" aria-label="Section name" required')}
+      ${check('s_on', 'On', sec.enabled !== false)}${check('s_front', 'On the front page', sec.front !== false)}
+      <label class="nsec__with"><span>Front-page tile</span><select class="input" name="s_with" aria-label="Front-page tile">${[['', 'Its own'], ...cfg.widgets.news.settings.sections.filter(x => x.id !== sec.id).map(x => [x.id, `Shared with ${x.name}`])].map(([v, l]) => `<option value="${esc(v)}"${(sec.front_with || '') === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>${sec.id === 'music' || sec.personal ? check('s_personal', 'Only stories about my artists', !!sec.personal, 'From Music Companion: artists you play, own on vinyl or have seen live. “Everything” is a click away on the page.') : ''}
+      <span class="nsec__acts">${act('move-sec', ico('up'), `data-d="-1" aria-label="Move up" ${i === 0 ? 'disabled' : ''}`, 'btn--icon')}${act('move-sec', ico('down'), `data-d="1" aria-label="Move down" ${i === n - 1 ? 'disabled' : ''}`, 'btn--icon')}${act('remove-sec', 'Remove section', '', 'btn--danger')}</span></div>
+    <p class="nsec__hint">Feeds, in order of preference — when several carry the same story, the first one keeps it.</p>
+    <div data-feeds>${sec.feeds.map(feedRow).join('')}</div>
+    <div class="bar-actions" style="padding:10px 0 4px">${sugg.length ? `<select class="input nsec__sugg" data-suggest aria-label="Suggested sources"><option value="">Add a suggested source…</option>${sugg.map(f => `<option value="${esc(f.url)}" data-name="${esc(f.name)}">${esc(f.name)}</option>`).join('')}</select>` : ''}${act('add-feed', `${ico('plus')}Custom feed`, '', 'btn--go')}</div>
+    <div class="form-grid" style="margin-top:8px">
+      ${field('Hide stories mentioning (one per line)', `<textarea class="input" name="s_exclude" rows="3" spellcheck="false" placeholder="e.g. Strictly">${esc((sec.exclude || []).join('\n'))}</textarea>`)}
+      ${field('Only show stories mentioning (one per line)', `<textarea class="input" name="s_include" rows="3" spellcheck="false" placeholder="Empty = everything">${esc((sec.include || []).join('\n'))}</textarea>`)}
+      ${field('Keep in the archive for (days)', input('s_keep', sec.keep_days ?? 30, 'type="number" min="3" max="365"'), 'Saved and 👍 stories are kept for good.')}
+    </div>
+    <details class="nsec__lean"${(sec.favour || []).length || (sec.play_down || []).length ? ' open' : ''}><summary>Leanings — what this section favours and plays down</summary>
+      <div class="form-grid" style="margin-top:8px">
+        ${field('Favour (one per line)', `<textarea class="input" name="s_favour" rows="5" spellcheck="false" placeholder="e.g. space&#10;physics">${esc((sec.favour || []).join('\n'))}</textarea>`, 'Stories mentioning these move up.')}
+        ${field('Play down (one per line)', `<textarea class="input" name="s_play_down" rows="5" spellcheck="false" placeholder="e.g. climate&#10;weather">${esc((sec.play_down || []).join('\n'))}</textarea>`, 'These sink down the list but aren’t hidden. A word, a feed’s own category (e.g. “Climate change”), or part of an address starting with “/” (e.g. /weather/).')}
+      </div></details></fieldset>`;
+}
+
+function newsSectionsCard() {
+  const s = cfg.widgets.news.settings;
+  return card('Sections and sources', `Reputable outlets only: tabloid sites (The Sun, the Mail, the Express, the Star, the Mirror, the Daily Record, Metro) are always refused, and their stories are dropped even if another feed links to them.`,
+    `<form class="form" data-form="news-sections" style="padding:0 18px 12px"><div id="nsecs">${s.sections.map((x, i) => sectionBlock(x, i, s.sections.length)).join('')}</div>
+      <div class="bar-actions" style="padding:12px 0 0">${act('add-sec', `${ico('plus')}Add section`, '', 'btn--go')}</div>
+      <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="news"')}<button class="btn btn--solid" type="submit">Save sections</button></div></form>`);
+}
+
+const newsTab = () => newsFrontCard() + newsShieldCard() + newsLearningCard() + newsSectionsCard();
+/** After a move/add/remove, only the first section can't go up and only the last can't go down. */
+function renumberSections() {
+  const all = $$('#nsecs [data-sec]');
+  all.forEach((el, i) => { const [up, down] = $$('[data-do="move-sec"]', el); up.disabled = i === 0; down.disabled = i === all.length - 1; });
 }
 
 // ---- Music page: Spotify, the outside services, playlist defaults ----------------------------------------------------------
@@ -580,11 +666,12 @@ function aboutTab() {
 function render() {
   if (editing?.kind !== 'theme') useTheme(chosen(), cfg.appearance.themes);     // ends any live preview; picks up edits made elsewhere
   $('#tabs').innerHTML = TABS.map(([id, label, icon]) => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}"${id === 'maintenance' && needsAttention() ? ' class="has-attn"' : ''}>${ico(icon)}${esc(label)}</button>`).join('');
-  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), listen: musicPageTab, news: newsSettingsCard, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
+  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), listen: musicPageTab, news: newsTab, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
 }
 
 async function load() {
   musicCfg = await api.get('/api/owner/music').catch(() => null);
+  [newsExtra.learning, newsExtra.f1] = await Promise.all([api.get('/api/owner/news/learning').catch(() => null), api.get('/api/owner/news/f1').catch(() => null)]);
   [cfg, live, extras.artists, extras.gigs] = await Promise.all([api.get('/api/owner/config'), api.get('/api/owner/state').then(s => s.widgets), api.get('/api/owner/artists'), api.get('/api/owner/gigs').then(r => r.gigs), loadMaint()]).then(r => r.slice(0, 4));
   render();
 }
@@ -629,6 +716,13 @@ panel.addEventListener('change', e => {
   if (mode) {                                                                    // show the time box for "Daily at", the number box for "Every"
     const f = mode.form, every = mode.value === 'every';
     f.elements.at.hidden = every; f.querySelector('.sched__every').hidden = !every;
+    return;
+  }
+  const sugg = e.target.closest('[data-suggest]');
+  if (sugg) {                                                                    // a suggested source becomes a feed row, ready to save
+    const opt = sugg.selectedOptions[0];
+    if (opt?.value) { $('[data-feeds]', sugg.closest('[data-sec]')).insertAdjacentHTML('beforeend', feedRow({ name: opt.dataset.name, url: opt.value })); opt.remove(); }
+    sugg.value = '';
     return;
   }
   const src = e.target.closest('[data-log-source]');
@@ -700,8 +794,40 @@ panel.addEventListener('click', e => {
         .finally(() => { b.disabled = false; b.textContent = 'Check'; });
       break;
     }
-    case 'add-feed': $('#feeds').insertAdjacentHTML('beforeend', feedRow()); $('#feeds [data-feed]:last-child input')?.focus(); break;
+    case 'add-feed': { const list = $('[data-feeds]', b.closest('[data-sec]')); list.insertAdjacentHTML('beforeend', feedRow()); $('[data-feed]:last-child input', list)?.focus(); break; }
     case 'remove-feed': b.closest('[data-feed]').remove(); break;
+    case 'test-feed': {
+      const row = b.closest('[data-feed]'), url = row.querySelector('[name=f_url]').value.trim(), out = $('.feedcfg__result', row);
+      if (!url) { toast('Enter the feed’s address first'); break; }
+      b.disabled = true; b.textContent = 'Testing…';
+      api.post('/api/owner/news/test-feed', { url })
+        .then(r => {
+          out.innerHTML = r.ok ? `<span class="feedcfg__st">✓ ${esc(r.title || 'A feed')} — ${r.items} stories, ${r.last24} in the last 24 h${r.images ? `, ${r.images} with pictures` : ''}. e.g. “${esc(r.sample[0] || '')}”</span>` : `<span class="feedcfg__st feedcfg__st--err">✗ ${esc(r.error)}</span>`;
+          const name = row.querySelector('[name=f_name]');
+          if (r.ok && !name.value.trim() && r.title) name.value = r.title.slice(0, 40);
+        })
+        .catch(err => toast(err.message)).finally(() => { b.disabled = false; b.textContent = 'Test'; });
+      break;
+    }
+    case 'move-sec': {
+      const sec = b.closest('[data-sec]'), other = Number(d.d) < 0 ? sec.previousElementSibling : sec.nextElementSibling;
+      if (other) { Number(d.d) < 0 ? other.before(sec) : other.after(sec); renumberSections(); }
+      break;
+    }
+    case 'remove-sec': {
+      const sec = b.closest('[data-sec]'), name = sec.querySelector('[name=s_name]').value.trim() || 'this section';
+      if ($$('[data-sec]').length < 2) { toast('Keep at least one section'); break; }
+      if (confirm(`Remove ${name}? Its stories go once you save (anything saved or liked stays in the Archive).`)) { sec.remove(); renumberSections(); }
+      break;
+    }
+    case 'add-sec': {
+      $('#nsecs').insertAdjacentHTML('beforeend', sectionBlock({ name: '', enabled: true, front: true, keep_days: 30, feeds: [], include: [], exclude: [] }, 1, 1));
+      renumberSections(); $('#nsecs [data-sec]:last-child [name=s_name]')?.focus();
+      break;
+    }
+    case 'forget-topic': run(() => api.del(`/api/owner/news/learning/topics?key=${encodeURIComponent(d.key)}`), 'Forgotten'); break;
+    case 'delete-rule': run(() => api.del(`/api/owner/news/rules/${d.id}`), 'Rule removed'); break;
+    case 'reset-learning': if (confirm('Forget everything the News page has learned from your 👍 and 👎? Your “Never show” rules stay.')) run(() => api.post('/api/owner/news/learning/reset'), 'Learning reset'); break;
     case 'delete-link': if (confirm(`Delete the “${d.name}” link?`)) run(() => api.del(`/api/owner/links/${d.id}`), 'Link deleted'); break;
     case 'delete-project': if (confirm(`Delete “${d.name}”? It will be stopped first. Your project's files are not touched.`)) run(() => api.del(`/api/owner/projects/${d.id}`), 'Project deleted'); break;
     case 'move-link': case 'move-project': {
@@ -809,17 +935,25 @@ panel.addEventListener('submit', e => {
     run(() => api.put('/api/owner/widgets/vinyl/settings', { shops }), 'Saved — syncing');
   } else if (kind === 'radar') {
     run(() => api.put('/api/owner/widgets/radar/settings', { latlong: val(f, 'latlong'), radius_miles: Number(val(f, 'radius_miles')), batch: Number(val(f, 'batch')), api_key: val(f, 'api_key') }), 'Saved — syncing');
-  } else if (kind === 'news') {
-    const lines = name => val(f, name).split('\n').map(l => l.trim()).filter(Boolean);
-    const rowLines = (r, name) => (r.querySelector(`[name=${name}]`)?.value || '').split('\n').map(l => l.trim()).filter(Boolean);
-    const feeds = $$('[data-feed]', f).map(r => {
-      const feed = { id: r.dataset.id || undefined, name: r.querySelector('[name=f_name]').value.trim(), url: r.querySelector('[name=f_url]').value.trim(), enabled: r.querySelector('[name=f_on]').checked };
-      const inc = rowLines(r, 'f_include'), exc = rowLines(r, 'f_exclude');
-      if (inc.length) feed.include = inc;
-      if (exc.length) feed.exclude = exc;
-      return feed;
-    }).filter(x => x.name || x.url);
-    run(() => api.put('/api/owner/widgets/news/settings', { feeds, include: lines('include'), exclude: lines('exclude'), max_age_days: Number(val(f, 'max_age_days')) }), 'Saved — syncing');
+  } else if (kind === 'news-front') {
+    run(() => api.put('/api/owner/widgets/news/settings', { most_read: on(f, 'most_read'), front_per_section: Number(val(f, 'front_per_section')), latest_hours: Number(val(f, 'latest_hours')), latest_cap: Number(val(f, 'latest_cap')) }), 'Saved');
+  } else if (kind === 'news-f1') {
+    const round = val(f, 'f1_watched'), season = Number(f.dataset.season);
+    run(() => api.put('/api/owner/widgets/news/settings', { f1_shield: on(f, 'f1_shield'), f1_extra_terms: lines(val(f, 'f1_extra_terms')),
+      f1_watched: round === '' || !season ? null : { season, round: Number(round) } }), 'Saved');
+  } else if (kind === 'news-rule') {
+    run(async () => { await api.post('/api/owner/news/rules', { term: val(f, 'term'), section: val(f, 'section') || null }); }, 'Rule added');
+  } else if (kind === 'news-sections') {
+    const sections = $$('[data-sec]', f).map(el => ({
+      id: el.dataset.id || undefined, name: el.querySelector('[name=s_name]').value.trim(), enabled: el.querySelector('[name=s_on]').checked,
+      front: el.querySelector('[name=s_front]').checked, keep_days: Number(el.querySelector('[name=s_keep]').value) || 30,
+      exclude: lines(el.querySelector('[name=s_exclude]').value), include: lines(el.querySelector('[name=s_include]').value),
+      favour: lines(el.querySelector('[name=s_favour]').value), play_down: lines(el.querySelector('[name=s_play_down]').value),
+      personal: !!el.querySelector('[name=s_personal]')?.checked, front_with: el.querySelector('[name=s_with]')?.value || null,
+      feeds: $$('[data-feed]', el).map(r => ({ id: r.dataset.id || undefined, name: r.querySelector('[name=f_name]').value.trim(), url: r.querySelector('[name=f_url]').value.trim(),
+        enabled: r.querySelector('[name=f_on]').checked })).filter(x => x.name || x.url),
+    }));
+    run(() => api.put('/api/owner/widgets/news/settings', { sections }), 'Saved — syncing');
   } else if (kind === 'schedule') {
     const every = val(f, 'mode') === 'every';
     const body = every ? { mode: 'every', seconds: Math.round(Number(val(f, 'amount')) * Number(val(f, 'unit'))) } : { mode: 'daily', at: val(f, 'at') };
@@ -851,7 +985,7 @@ api.subscribe(() => {
   statusTimer = setTimeout(async () => {
     try {
       live = (await api.get('/api/owner/state')).widgets;
-      $$('[data-status]').forEach(el => { const w = live[el.dataset.status]; if (w) el.outerHTML = statusLine(w, el.dataset.status); });
+      $$('[data-status]').forEach(el => { const w = live[el.dataset.status]; if (w) el.outerHTML = statusLine(w, el.dataset.status, el.dataset.label || ''); });
       if (tab === 'maintenance') await paintMaint();
     } catch { /* transient */ }
   }, 500);
