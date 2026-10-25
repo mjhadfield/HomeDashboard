@@ -293,6 +293,175 @@ def test_the_matcher_prefers_the_right_artist_and_the_studio_version():
 
 # ---- rotation ------------------------------------------------------------------------------------------------------
 
+@pytest.fixture()
+def saved_playlist(spotify):
+    pl = playlists.from_template("blank", name="Saved mix", mode="rot", schedule={"every": "daily", "at": "06:00"},
+                                 ings=[{"kind": "history", "share": 50, "params": {}}, {"kind": "deep", "share": 50, "params": {}}])
+    rows = [{"key": f"old-{i}", "title": f"Old song {i}", "artist": "Gojira", "uri": f"spotify:track:old{i}"} for i in range(2)]
+    with db.db() as con:
+        playlists._write_tracks(con, pl["id"], rows)
+        con.execute("UPDATE music_playlists SET built_at = 100, saved_at = 200, spotify_id = 'existing', spotify_url = 'https://open.spotify.com/playlist/existing' WHERE id = ?", (pl["id"],))
+        con.executemany("INSERT INTO music_playlist_history (playlist_id, run, key) VALUES (?, 100, ?)", [(pl["id"], t["key"]) for t in rows])
+    return playlists.get(pl["id"])
+
+
+def _history(pid):
+    with db.db() as con:
+        return [tuple(r) for r in con.execute("SELECT * FROM music_playlist_history WHERE playlist_id = ? ORDER BY run, key", (pid,))]
+
+
+@pytest.mark.parametrize("survivor", ["fresh", "locked", "none"])
+@pytest.mark.parametrize("failure", [ServiceError, library.LibraryMissing, LookupError, RuntimeError])
+@sync
+async def test_failed_rotation_keeps_local_and_spotify_playlists(saved_playlist, spotify, monkeypatch, survivor, failure):
+    pid = saved_playlist["id"]
+    if survivor == "locked":
+        playlists.edit_tracks(pid, "lock", 0)
+    before, old, history = playlists.get(pid), playlists.tracks(pid), _history(pid)
+
+    async def pick(ing):
+        if survivor == "fresh" and ing["kind"] == "deep":
+            return [{"key": "new", "title": "New song", "artist": "Gojira", "uri": "spotify:track:new"}]
+        raise failure("source unavailable")
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    with pytest.raises(playlists.PlaylistError, match="Kept the previous playlist:.*source unavailable"):
+        await playlists.rotate(pid)
+
+    after = playlists.get(pid)
+    assert after == {**before, "last_error": after["last_error"]}
+    assert playlists.tracks(pid) == old and _history(pid) == history
+    assert spotify.calls == []
+
+
+@sync
+async def test_rotation_keeps_the_previous_playlist_when_matching_fails(saved_playlist, spotify, monkeypatch):
+    pid = saved_playlist["id"]
+    playlists.edit_tracks(pid, "lock", 0)
+    old, history = playlists.tracks(pid), _history(pid)
+
+    async def pick(ing):
+        return [{"key": "new", "title": "New song", "artist": "Gojira"}]
+
+    async def match(rows):
+        raise ServiceError("Spotify search unavailable")
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    monkeypatch.setattr(matcher, "match", match)
+    with pytest.raises(playlists.PlaylistError, match="Spotify search unavailable"):
+        await playlists.rotate(pid)
+    assert playlists.tracks(pid) == old and _history(pid) == history
+    assert playlists.get(pid)["built_at"] == 100 and playlists.get(pid)["saved_at"] == 200
+    assert spotify.calls == []
+
+
+@pytest.mark.parametrize("unmatched", [False, True])
+@sync
+async def test_rotation_preserves_existing_tracks_when_no_playable_tracks_are_found(saved_playlist, spotify, monkeypatch, unmatched):
+    pid = saved_playlist["id"]
+    old = playlists.tracks(pid)
+
+    async def pick(ing):
+        return [{"key": "missing", "title": "Divinations", "artist": "Mastodon"}] if unmatched else []
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    with pytest.raises(playlists.PlaylistError, match="no tracks"):
+        await playlists.rotate(pid)
+    assert playlists.tracks(pid) == old
+    assert playlists.get(pid)["built_at"] == 100 and playlists.get(pid)["saved_at"] == 200
+    assert not any(c[0] in ("create", "update", "items") for c in spotify.calls)
+
+
+@sync
+async def test_rotation_accepts_a_successfully_empty_ingredient_and_clears_the_error(saved_playlist, spotify, monkeypatch):
+    pid = saved_playlist["id"]
+    with db.db() as con:
+        con.execute("UPDATE music_playlists SET last_error = 'previous outage' WHERE id = ?", (pid,))
+
+    async def pick(ing):
+        return [] if ing["kind"] == "history" else [{"key": "new", "title": "New song", "artist": "Gojira", "uri": "spotify:track:new"}]
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    result = await playlists.rotate(pid)
+    assert result["errors"] == [] and result["tracks"] == 1
+    assert [t["key"] for t in playlists.tracks(pid)] == ["new"]
+    assert ("items", "existing", 1) in spotify.calls and spotify.made == 0
+    after = playlists.get(pid)
+    assert after["built_at"] > 100 and after["saved_at"] > 200 and after["last_error"] == ""
+
+
+@sync
+async def test_manual_build_still_reports_warnings_with_a_partial_result(saved_playlist, monkeypatch):
+    async def pick(ing):
+        if ing["kind"] == "history":
+            raise ServiceError("source unavailable")
+        return [{"key": "new", "title": "New song", "artist": "Gojira", "uri": "spotify:track:new"}]
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    result = await playlists.build(saved_playlist["id"])
+    assert result["errors"] == ["source unavailable"] and result["tracks"] == 1
+    assert [t["key"] for t in playlists.tracks(saved_playlist["id"])] == ["new"]
+
+
+@sync
+async def test_incomplete_rotation_backs_off_then_recovers(saved_playlist, spotify, monkeypatch):
+    calls = []
+    failing = True
+
+    async def pick(ing):
+        calls.append(ing["kind"])
+        if failing:
+            raise ServiceError("source unavailable")
+        return [{"key": "new", "title": "New song", "artist": "Gojira", "uri": "spotify:track:new"}]
+
+    monkeypatch.setattr(ingredients, "pick", pick)
+    rot = Rotator()
+    now = time.time()
+    assert await rot.tick(now) == []
+    attempts = len(calls)
+    assert attempts and await rot.tick(now + 60) == [] and len(calls) == attempts
+    assert spotify.calls == []
+    failing = False
+    assert await rot.tick(now + 1801) == [saved_playlist["name"]]
+    assert playlists.get(saved_playlist["id"])["last_error"] == ""
+
+
+@pytest.mark.parametrize("failure", [True, False])
+@sync
+async def test_post_gig_build_is_staged_before_changing_the_playlist(saved_playlist, spotify, monkeypatch, failure):
+    pid = saved_playlist["id"]
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    with db.db() as con:
+        con.execute("UPDATE music_playlists SET meta = ? WHERE id = ?", (json.dumps({"gig": {"artist": "Gojira", "date": yesterday}}), pid))
+    playlists.edit_tracks(pid, "lock", 0)
+    before, old, history = playlists.get(pid), playlists.tracks(pid), _history(pid)
+
+    async def as_played(artist, day):
+        return {"id": "real-setlist"}
+
+    async def pick(ing):
+        if failure:
+            raise ServiceError("setlist unavailable")
+        assert ing["kind"] == "gig" and ing["params"]["id"] == "real-setlist"
+        return [{"key": "real", "title": "Real song", "artist": "Gojira", "uri": "spotify:track:real"}]
+
+    monkeypatch.setattr(gigs, "as_played", as_played)
+    monkeypatch.setattr(ingredients, "pick", pick)
+    if failure:
+        rot = Rotator()
+        assert await rot.tick() == []
+        after = playlists.get(pid)
+        assert after == {**before, "last_error": after["last_error"]}
+        assert "setlist unavailable" in after["last_error"]
+        assert playlists.tracks(pid) == old and _history(pid) == history and spotify.calls == []
+    else:
+        assert await playlists.after_gig(before)
+        after = playlists.get(pid)
+        assert after["mode"] == "fixed" and "as played" in after["name"]
+        assert [(t["key"], t["locked"]) for t in playlists.tracks(pid)] == [("real", False)]
+        assert ("items", "existing", 1) in spotify.calls
+
+
 def _at(y, m, d, h=12):
     return int(datetime(y, m, d, h, tzinfo=config.TZ).timestamp())
 

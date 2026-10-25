@@ -240,11 +240,18 @@ def _quotas(ings: list[dict[str, Any]], n: int) -> list[int]:
     return q
 
 
-async def build(pid: int, *, seed: int | None = None) -> dict[str, Any]:
-    """Pick a fresh track list from the design. Returns {tracks, errors, missing}."""
-    pl = get(pid)
+async def build(pid: int, *, seed: int | None = None, unattended: bool = False) -> dict[str, Any]:
+    """Pick a fresh track list. Unattended builds keep the previous list if any input fails."""
+    rows, errors = await _build_rows(get(pid), tracks(pid), seed=seed)
+    if unattended:
+        _require_complete_build(pid, rows, errors)
+    return _commit_build(pid, rows, errors)
+
+
+async def _build_rows(pl: dict[str, Any], old: list[dict[str, Any]], *, seed: int | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """Stage picks and matches without changing the playlist's tracks, design or timestamps."""
+    pid = pl["id"]
     rules, rnd = pl["rules"], random.Random(seed)
-    old = tracks(pid)
     locked = [t for t in old if t["locked"]]
     with db.db() as con:
         bans = {r["key"] for r in con.execute("SELECT key FROM music_playlist_bans WHERE playlist_id = ?", (pid,))}
@@ -328,6 +335,27 @@ async def build(pid: int, *, seed: int | None = None) -> dict[str, Any]:
             chosen = _spread(chosen)
     rows = locked + chosen if order == "setlist" else _merge_locked(old, chosen)
     errors += await _match_rows(rows)
+    return rows, errors
+
+
+def _require_complete_build(pid: int, rows: list[dict[str, Any]], errors: list[str]) -> None:
+    """A failed input is not a valid empty pool; never publish its partial result unattended."""
+    if errors:
+        problem = "; ".join(errors)
+    elif not rows:
+        problem = "no tracks were found"
+    elif not any(r.get("uri") for r in rows):
+        problem = "no tracks could be matched on Spotify"
+    else:
+        return
+    message = f"Kept the previous playlist: {problem}"
+    with db.db() as con:
+        con.execute("UPDATE music_playlists SET last_error = ? WHERE id = ?", (message[:300], pid))
+    store.changed("playlists")
+    raise PlaylistError(message)
+
+
+def _commit_build(pid: int, rows: list[dict[str, Any]], errors: list[str]) -> dict[str, Any]:
     with db.db() as con:
         _write_tracks(con, pid, rows)
         con.execute("UPDATE music_playlists SET built_at = ? WHERE id = ?", (int(time.time()), pid))
@@ -447,7 +475,7 @@ def due(now: float | None = None) -> list[dict[str, Any]]:
 
 
 async def rotate(pid: int) -> dict[str, Any]:
-    result = await build(pid)
+    result = await build(pid, unattended=True)
     saved = await save(pid)
     return {**result, **saved}
 
@@ -460,11 +488,12 @@ async def after_gig(pl: dict[str, Any]) -> bool:
         return False
     real = await gigs.as_played(gig["artist"], gig["date"])
     if real:
-        save_design({**pl, "name": f"{gig['artist']} — as played, {gig['date']}", "mode": "fixed",
-                      "ings": [{"kind": "gig", "share": 100, "params": {"kind": "setlistfm", "id": real["id"]}}]}, pl["id"])
-        with db.db() as con:
-            con.execute("UPDATE music_playlist_tracks SET locked = 0 WHERE playlist_id = ?", (pl["id"],))
-        await build(pl["id"])
+        updated = {**pl, "name": f"{gig['artist']} — as played, {gig['date']}", "mode": "fixed",
+                   "ings": ingredients.check([{"kind": "gig", "share": 100, "params": {"kind": "setlistfm", "id": real["id"]}}])}
+        rows, errors = await _build_rows(updated, [{**t, "locked": False} for t in tracks(pl["id"])])
+        _require_complete_build(pl["id"], rows, errors)
+        save_design(updated, pl["id"])
+        _commit_build(pl["id"], rows, errors)
         if pl.get("spotify_id"):
             await save(pl["id"])
         return True

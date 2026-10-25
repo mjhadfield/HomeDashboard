@@ -6,3 +6,6 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+# local OpenAI review notes
+/AGENTS.md
+/docs/openai-review-2026-10-25.md

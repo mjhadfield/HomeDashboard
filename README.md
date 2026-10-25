@@ -138,6 +138,11 @@ to "Reading sensors…" on every one of those, even though its own data was perf
 - `app/widgets/*.py` — one file per data source. Add a file exposing `widget = MyWidget()` and it is picked up.
 - `web/` — the UI. `web/mock/` is the archived design mockup.
 
+Schema upgrades live in `app/migrations/NNN_*.sql` and run at startup. Each script and its applied marker commit
+together; a failed upgrade rolls back that script's schema and data changes so it can be corrected and retried.
+Earlier successful migrations stay applied. The runner owns the transaction, so migration scripts must not contain
+their own `BEGIN`, `COMMIT` or `ROLLBACK`, or operations that require running outside a transaction (such as `VACUUM`).
+
 ## Music & news cards
 
 | Card | Source | Needs |
@@ -212,7 +217,12 @@ account, plus a player bar that steers Spotify wherever it's playing — the des
   tracklists, deep cuts, picked artists, a genre, a gig setlist, new releases, Last.fm similar artists, MusicBrainz band
   connections, a Last.fm tag) and *rules* (length, max per artist, familiar ↔ new, skip recent plays, no repeats, order).
   **Fixed** playlists change only when rebuilt; **rotating** ones are rebuilt on schedule into the *same* Spotify
-  playlist (so its link and followers stay). Lock a track to keep it through rebuilds; remove one and that playlist
+  playlist (so its link and followers stay). A scheduled rebuild keeps the previous local and Spotify playlists
+  if an ingredient or Spotify matching fails, or no playable tracks are found; the failure is shown on the playlist
+  and retried after the usual back-off. An ingredient returning no songs successfully can still be filled from
+  the others. Post-gig setlist updates use the same safeguard, keeping the prediction and its locks until a replacement
+  is ready. Manual rebuilds can still show a partial draft with warnings for you to review before saving.
+  Lock a track to keep it through rebuilds; remove one and that playlist
   leaves it out for good. Songs Spotify can't match are listed with a **Find…** to pick by hand (remembered).
 - **Discover** — artists you've never (or barely) played, drawn from your top 100 by Last.fm similarity and MusicBrainz
   shared members, weighted by how much you play the artists they connect to and spread so no one vibe or artist fills

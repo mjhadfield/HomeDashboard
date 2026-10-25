@@ -41,7 +41,7 @@ def db() -> Iterator[sqlite3.Connection]:
 
 
 def migrate() -> list[str]:
-    """Apply any unapplied migrations/NNN_*.sql in order. Returns the names applied."""
+    """Apply pending scripts in order, each atomically with its marker. Returns the names applied."""
     applied: list[str] = []
     con = connect()
     try:
@@ -50,9 +50,12 @@ def migrate() -> list[str]:
         for path in sorted(MIGRATIONS.glob("*.sql")):
             if path.name in done:
                 continue
-            con.executescript(path.read_text())
-            con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (path.name, int(time.time())))
-            con.commit()
+            with con:
+                # executescript commits a pending transaction before running, so BEGIN must be
+                # inside the script. The context commits the script and marker together, or rolls
+                # both back if a statement, the marker insert, or the final commit fails.
+                con.executescript("BEGIN IMMEDIATE;\n" + path.read_text() + "\n")
+                con.execute("INSERT INTO schema_migrations VALUES (?, ?)", (path.name, int(time.time())))
             applied.append(path.name)
     finally:
         con.close()

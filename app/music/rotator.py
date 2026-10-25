@@ -68,7 +68,7 @@ class Rotator:
                         log.info("Music: %s now has the real setlist (or stopped waiting for one)", pl["name"])
                         done.append(pl["name"])
                         continue
-                except (ServiceError, LookupError) as e:
+                except (ServiceError, LookupError, playlists.PlaylistError) as e:
                     log.warning("Music: couldn’t check %s’s real setlist: %s", pl["name"], e)
         for pl in playlists.due(now):
             if self.last_check - self._failed.get(pl["id"], 0) < BACKOFF:
