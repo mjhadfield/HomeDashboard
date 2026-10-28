@@ -6,6 +6,6 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
-# local OpenAI review notes
+# local notes (old full README, OpenAI review) - never published
 /AGENTS.md
-/docs/openai-review-2026-10-25.md
+/docs/
