@@ -67,7 +67,10 @@ class Health:
 
     def _record(self, key: str, ok: bool, ms: int) -> bool:
         old = self.state.get(key)
-        self.state[key] = {"ok": ok, "ms": ms, "at": int(time.time())}
+        at = int(time.time())
+        # `down_since`: when this run of failed probes began (for the "something's down" reminder), None while up.
+        down_since = None if ok else (old.get("down_since") if old and not old["ok"] and old.get("down_since") else at)
+        self.state[key] = {"ok": ok, "ms": ms, "at": at, "down_since": down_since}
         return old is None or old["ok"] != ok
 
     async def check_all(self, client: httpx.AsyncClient) -> bool:

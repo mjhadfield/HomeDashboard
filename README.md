@@ -18,6 +18,8 @@ There's a write-up with more screenshots on [my website](https://www.mikehadfiel
 
 Every tile can be expanded into a full screen view with more detail, pinning and filters.
 
+Along the top runs a **reminder strip**: bin night, a gig tonight, a pre-order arriving, an album out tomorrow or today, an F1 session starting soon, tickets going on sale, fresh announcements from my top artists, and anything that's stopped answering (or the PC running short of memory or disk). Each one has a ✕ that dismisses it everywhere, the TV included, with a few seconds to undo. Only that one occurrence goes, so next week's bin still shows. Which kinds appear is set in Settings → Widgets → Notifications.
+
 - **Bins** - which bin goes out tonight, pulled from the Council's website
 - **Next gig** - a countdown to my next booked show
 - **Diary** - my Google Calendar

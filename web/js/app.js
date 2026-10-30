@@ -3,7 +3,7 @@ import * as api from './api.js';
 import { cards, ui, selectedSlug } from './cards.js';
 import { vinylUi } from './content-cards.js';
 import { Shell } from './shell.js';
-import { $, $$, esc, hostUrl, ico, tickClock, tickUptimes, toast } from './util.js';
+import { $, $$, esc, hostUrl, ico, safeUrl, tickClock, tickUptimes, toast } from './util.js';
 import { BUILTIN, chosen, currentLook, currentTheme, specOf, syncThemes, useTheme } from './theme.js';
 import * as music from './music.js';
 import * as news from './news.js';
@@ -34,10 +34,49 @@ function renderCard(id) {
   if (id === 'now') tickClock();
 }
 
+// The reminder strip. ✕ hides that one reminder everywhere (TVs too) — its key names one occurrence, so next
+// week's bin or the next race still shows — and leaves a few seconds of "Undo" in its place. The server sends them
+// most urgent first; past ALERTS_SHOWN the rest fold behind "+N more" so the fixed 1440p grid isn't pushed down.
+const ALERTS_SHOWN = 6;
+const UNDO_MS = 6000;
+let alertsOpen = false;
+const undoable = new Map();                           // key -> { title, timer }
+
+function alertHtml(a) {
+  const title = a.href ? `<a href="${esc(safeUrl(a.href))}" target="_blank" rel="noopener">${esc(a.title)}</a>` : esc(a.title);
+  const done = a.done || 'Dismiss';
+  return `<div class="alert alert--${esc(a.level)} cut">${ico(a.icon)}
+    <span class="alert__text"><b>${title}</b> — ${esc(a.detail)}</span>
+    <span class="chip ${a.level === 'now' ? 'chip--today' : a.level === 'info' ? 'chip--fresh' : 'chip--new'} alert__when">${esc(a.chip)}</span>
+    ${a.key ? `<button class="btn btn--icon alert__x" type="button" data-alert-dismiss="${esc(a.key)}" aria-label="${esc(done)}: ${esc(a.title)}" title="${esc(done)}">${ico(a.done ? 'check' : 'x')}</button>` : ''}</div>`;
+}
+
 function renderAlerts() {
-  $('#alerts').innerHTML = state.alerts.map(a => `<div class="alert cut">${ico(a.icon)}
-    <span><b>${esc(a.title)}</b> — ${esc(a.detail)}</span>
-    <span class="chip ${a.level === 'now' ? 'chip--today' : 'chip--new'} alert__when">${esc(a.chip)}</span></div>`).join('');
+  const list = state.alerts.filter(a => !undoable.has(a.key));
+  const folded = !alertsOpen && list.length > ALERTS_SHOWN ? list.length - (ALERTS_SHOWN - 1) : 0;
+  const shown = folded ? list.slice(0, ALERTS_SHOWN - 1) : list;
+  const undo = [...undoable].map(([key, u]) => `<div class="alert alert--undo cut"><span class="alert__text">Dismissed <b>${esc(u.title)}</b></span>
+    <button class="btn" type="button" data-alert-restore="${esc(key)}">Undo</button></div>`);
+  const more = folded ? `<button class="btn alerts__more" type="button" data-alerts-more aria-expanded="false">+${folded} more</button>`
+    : alertsOpen && list.length > ALERTS_SHOWN ? '<button class="btn alerts__more" type="button" data-alerts-more aria-expanded="true">Show fewer</button>' : '';
+  $('#alerts').innerHTML = [...undo, ...shown.map(alertHtml), more].join('');
+}
+
+async function dismissAlert(key) {
+  const a = state.alerts.find(x => x.key === key);
+  if (!a) return;
+  undoable.set(key, { title: a.title, timer: setTimeout(() => { undoable.delete(key); state.alerts = state.alerts.filter(x => x.key !== key); renderAlerts(); }, UNDO_MS) });
+  renderAlerts();
+  try { await api.post('/api/owner/alerts/dismiss', { key }); }
+  catch (err) { clearTimeout(undoable.get(key)?.timer); undoable.delete(key); renderAlerts(); toast(`Couldn't dismiss: ${err.message}`); }
+}
+
+async function restoreAlert(key) {
+  clearTimeout(undoable.get(key)?.timer);
+  undoable.delete(key);
+  try { await api.post('/api/owner/alerts/restore', { key }); }
+  catch (err) { toast(`Couldn't undo: ${err.message}`); }
+  await load();
 }
 
 // The Media page's iframe is created once in the HTML and its src is set exactly once, here — never
@@ -245,6 +284,11 @@ document.addEventListener('click', async e => {
   const use = e.target.closest('[data-use-theme]');
   if (use) { useTheme(use.dataset.useTheme, state?.appearance?.themes); closeThemeMenu(); return; }
   if ($('#theme-menu') && !e.target.closest('#theme-menu')) closeThemeMenu();
+  const dismiss = e.target.closest('[data-alert-dismiss]');
+  if (dismiss) { dismissAlert(dismiss.dataset.alertDismiss); return; }
+  const restore = e.target.closest('[data-alert-restore]');
+  if (restore) { restoreAlert(restore.dataset.alertRestore); return; }
+  if (e.target.closest('[data-alerts-more]')) { alertsOpen = !alertsOpen; renderAlerts(); return; }
   const pin = e.target.closest('[data-pin]');
   if (pin) {                                                                // pin / unpin a link or project
     const { pin: kind, id, to } = pin.dataset;

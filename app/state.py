@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
-from . import __version__, appearance, config, db, procs
+from . import __version__, alerts as alert_settings, appearance, config, content, db, procs
 from .health import Health
+from .monitor import Monitor, low_disks
 from .schemas import TV_DEFAULTS, TV_PANELS
 from .widgets import discover
 from .widgets.base import Widget
@@ -104,13 +106,49 @@ def links_state(health: Health, guest_only: bool = False) -> list[dict[str, Any]
 
 
 # ---- alerts ------------------------------------------------------------------------------------
+# Each alert has a `key` naming that one occurrence, so it can be dismissed (app/alerts.py) without hiding the next one.
 
 BIN_NAMES = {"domestic": "Domestic", "blue": "Blue", "brown": "Brown", "food": "Food & garden"}
+FULL_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+F1_LEAD = 3 * 3600                                     # "starting soon" from this long before a session…
+F1_LIVE = {"Race": 2 * 3600}                           # …and "live" for this long after it starts (others: an hour)
+FRESH_FOR = 24 * 3600                                  # a new announcement is news for a day
+FRESH_LABELS = {"release": ("New album announced", "new albums announced", "star"),
+                "radar": ("New gig on your radar", "new gigs on your radar", "radar"),
+                "vinyl": ("New vinyl pre-order", "new vinyl pre-orders", "disc")}
+DOWN_AFTER = 10 * 60                                   # a service has to stay unreachable this long to be worth a reminder
+MEM_TIGHT_FOR = 2 * 60
+
+
+def _day(d: date) -> str:
+    return f"{d:%a} {d.day} {d:%b}" + (f" {d.year}" if d.year != now().year else "")
+
+
+def _in(seconds: float) -> str:
+    mins = max(0, int(seconds // 60))
+    return f"in {mins // 60}h {mins % 60:02d}m" if mins >= 60 else f"in {mins}m"
+
+
+def _when(t: datetime, at: datetime) -> str:
+    """A chip for something later today or tomorrow: 'in 40m', 'Today 10:00', 'Tomorrow 09:00'."""
+    if t - at < timedelta(hours=1):
+        return _in((t - at).total_seconds())
+    return f"{'Today' if t.date() == at.date() else 'Tomorrow' if t.date() == at.date() + timedelta(days=1) else _day(t.date())} {t:%H:%M}"
+
+
+def _names(items: list[dict[str, Any]], show: int = 2) -> str:
+    names = list(dict.fromkeys(i["artist"] or i["title"] for i in items))
+    return ", ".join(names[:show]) + (f" +{len(names) - show}" if len(names) > show else "")
+
+
+def _items(widgets: dict[str, dict[str, Any]], wid: str) -> list[dict[str, Any]]:
+    return ((widgets.get(wid) or {}).get("data") or {}).get("items") or []
 
 
 def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dict[str, Any]]:
     """Reminders that belong in the top strip. Bin day is the main one: 'out tonight' from the evening before."""
     alerts: list[dict[str, Any]] = []
+    on = alert_settings.settings()
 
     bins = widgets.get("bins", {})
     if bins.get("data"):
@@ -120,11 +158,12 @@ def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dic
                 continue
             name = BIN_NAMES.get(item["stream"], item["stream"])
             what = "recycling" if item["stream"] in ("blue", "brown") else "domestic waste"
+            key = f"bin:{item['stream']}:{item['date']}"          # one key for both: putting the bin out answers tomorrow's too
             if item["in_days"] == 1 and at.hour >= settings["put_out_hour"]:
-                alerts.append({"kind": "bin", "icon": "bin", "title": f"{name} bin out tonight",
+                alerts.append({"kind": "bin", "key": key, "icon": "bin", "title": f"{name} bin out tonight",
                                "detail": f"{what} collected tomorrow", "chip": "Tonight", "level": "now"})
             elif item["in_days"] == 0 and at.hour < 12:
-                alerts.append({"kind": "bin", "icon": "bin", "title": f"{name} bin — collection today",
+                alerts.append({"kind": "bin", "key": key, "icon": "bin", "title": f"{name} bin — collection today",
                                "detail": f"{what} collected this morning", "chip": "Today", "level": "now"})
 
     gigs = widgets.get("gigs", {})
@@ -133,8 +172,9 @@ def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dic
         if g["in_days"] in (0, 1):
             where = ", ".join(x for x in (g["venue"], g["city"]) if x)
             detail = " · ".join(x for x in (where, f"doors {g['doors']}" if g["doors"] else "") if x) or "gig"
-            alerts.append({"kind": "gig", "icon": "bolt", "title": g["artist"] if g["in_days"] else f"{g['artist']} tonight",
-                           "detail": detail, "chip": "Tonight" if g["in_days"] == 0 else "Tomorrow", "level": "now" if g["in_days"] == 0 else "soon"})
+            alerts.append({"kind": "gig", "key": f"gig:{g['id']}:{g['date']}", "icon": "bolt", "title": g["artist"] if g["in_days"] else f"{g['artist']} tonight",
+                           "detail": detail, "chip": "Tonight" if g["in_days"] == 0 else "Tomorrow", "level": "now" if g["in_days"] == 0 else "soon",
+                           "href": g.get("ticket_url") or None})
 
     diary = widgets.get("diary", {})
     if diary.get("data"):
@@ -143,9 +183,8 @@ def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dic
                 continue
             start = at.replace(hour=int(e["time"][:2]), minute=int(e["time"][3:]), second=0, microsecond=0)
             if timedelta(0) <= start - at <= timedelta(hours=3):
-                mins = int((start - at).total_seconds() // 60)
-                alerts.append({"kind": "event", "icon": "cal", "title": e["title"],
-                               "detail": e["location"] or e["time"], "chip": f"in {mins // 60}h {mins % 60:02d}m" if mins >= 60 else f"in {mins}m", "level": "soon"})
+                alerts.append({"kind": "event", "key": f"event:{e['date']}:{e['time']}:{e['title']}", "icon": "cal", "title": e["title"],
+                               "detail": e["location"] or e["time"], "chip": _in((start - at).total_seconds()), "level": "soon"})
                 break
 
     vinyl = widgets.get("vinyl", {})
@@ -155,16 +194,126 @@ def compute_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dic
                 continue
             chip = "Today" if p["in_days"] == 0 else "Tomorrow" if p["in_days"] == 1 else f"in {p['in_days']} days"
             variant = (p.get("meta") or {}).get("variant") or (p.get("meta") or {}).get("format") or "pre-order"
-            alerts.append({"kind": "vinyl", "icon": "disc", "title": f"{p['artist']} — {p['title']}" if p["artist"] else p["title"],
-                           "detail": variant, "chip": chip, "level": "now" if p["in_days"] == 0 else "soon"})
+            alerts.append({"kind": "vinyl", "key": f"vinyl:{p['id']}", "icon": "disc", "title": f"{p['artist']} — {p['title']}" if p["artist"] else p["title"],
+                           "detail": variant, "chip": chip, "level": "now" if p["in_days"] == 0 else "soon", "href": p.get("url") or None})
+
+    # Album releases: the day before and the day itself (only albums the Releases card shows, so its type filter applies).
+    if on["releases"]:
+        for r in _items(widgets, "releases"):
+            if not FULL_DATE.match(r["date"] or ""):
+                continue
+            days = (date.fromisoformat(r["date"]) - at.date()).days
+            if days in (0, 1):
+                kind = (r.get("meta") or {}).get("type") or "Album"
+                alerts.append({"kind": "release", "key": f"release:{r['id']}", "icon": "disc", "title": f"{r['artist']} — {r['title']}",
+                               "detail": f"new {kind.lower()} {'out today' if days == 0 else 'out tomorrow'}", "chip": "Out today" if days == 0 else "Tomorrow",
+                               "level": "now" if days == 0 else "soon", "href": r.get("url") or None, "done": "Listened"})
+
+    if on["f1"]:
+        alerts += _f1_alerts(at)
+    if on["onsale"]:
+        alerts += _onsale_alerts(widgets, at)
+    if on["fresh"]:
+        alerts += _fresh_alerts(widgets, at, int(on.get("top_artists") or 50))
     return alerts
+
+
+def _f1_alerts(at: datetime) -> list[dict[str, Any]]:
+    """A competitive session or the race starting within F1_LEAD, or under way. Names only — nothing that could spoil."""
+    cal = db.cache_get("f1cal")["data"] or {}
+    t, out = at.timestamp(), []
+    for rnd in cal.get("rounds", []):
+        for sess in rnd.get("sessions", []):
+            ahead = sess["at"] - t
+            if not -F1_LIVE.get(sess["key"], 3600) <= ahead <= F1_LEAD:
+                continue
+            start = datetime.fromtimestamp(sess["at"], config.TZ)
+            live = ahead <= 0
+            out.append({"kind": "f1", "key": f"f1:{cal.get('season')}:{rnd['round']}:{sess['key']}", "icon": "bolt",
+                        "title": f"{rnd['short']} — {sess['label']}", "detail": "under way" if live else f"starts {start:%H:%M}",
+                        "chip": "Live" if live else _in(ahead), "level": "now" if live or ahead <= 3600 else "soon"})
+    return out
+
+
+def _onsale_alerts(widgets: dict[str, dict[str, Any]], at: datetime) -> list[dict[str, Any]]:
+    """Gigs on the radar whose tickets (or a presale) go on sale later today or tomorrow."""
+    out = []
+    for g in _items(widgets, "radar"):
+        meta = g.get("meta") or {}
+        if meta.get("tribute"):
+            continue
+        times = [(meta["onsale"], "tickets on sale")] if meta.get("onsale") else []
+        times += [(p["at"], p["name"]) for p in meta.get("presales") or []]
+        for iso, what in times:
+            try:
+                when = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(config.TZ)
+            except (ValueError, AttributeError):
+                continue
+            if when <= at or (when.date() - at.date()).days > 1:
+                continue
+            where = meta.get("venue") or g.get("subtitle") or ""
+            gig_day = _day(date.fromisoformat(g["date"])) if FULL_DATE.match(g["date"] or "") else ""
+            out.append({"kind": "onsale", "key": f"onsale:{g['id']}:{iso}", "icon": "bolt",
+                        "title": f"{g['artist']} {what}" if what == "tickets on sale" else f"{g['artist']} — {what}",
+                        "detail": " · ".join(x for x in (where, gig_day) if x), "chip": _when(when, at),
+                        "level": "now" if when.date() == at.date() else "soon", "href": g.get("url") or None})
+    return out
+
+
+def _fresh_alerts(widgets: dict[str, dict[str, Any]], at: datetime, top: int) -> list[dict[str, Any]]:
+    """Newly found albums, gigs and pre-orders by your top artists — one grouped alert per kind, so a busy day isn't a flood.
+    Only what the card itself would show counts (its own filters apply); marking it seen on the card clears it here too."""
+    artists = content.top_artists(top)
+    out = []
+    for kind, (one, many, icon) in FRESH_LABELS.items():
+        shown = {i["id"] for i in _items(widgets, kind)}
+        items = [i for i in content.fresh_items(kind, int(at.timestamp()) - FRESH_FOR, artists) if i["id"] in shown]
+        if not items:
+            continue
+        key = f"fresh:{kind}:{items[0]['first_seen']}"            # newest first: anything newer makes a new key, and so a new alert
+        if len(items) == 1:
+            i = items[0]
+            when = _day(date.fromisoformat(i["date"])) if FULL_DATE.match(i["date"] or "") else ""
+            out.append({"kind": "fresh", "key": key, "icon": icon, "title": f"{i['artist']} — {i['title']}" if i["artist"] else i["title"],
+                        "detail": " · ".join(x for x in (one, when) if x), "chip": "New", "level": "info", "href": i.get("url") or None})
+        else:
+            out.append({"kind": "fresh", "key": key, "icon": icon, "title": f"{len(items)} {many}", "detail": _names(items),
+                        "chip": "New", "level": "info"})
+    return out
+
+
+def service_alerts(projects: list[dict[str, Any]], links: list[dict[str, Any]], health: Health, monitor: Monitor | None, at: datetime) -> list[dict[str, Any]]:
+    """Owner only: something that should be answering has been unreachable for a while, or this PC is short of room.
+    A project only counts while its service is running (a stopped project is meant to be down)."""
+    if not alert_settings.settings()["down"]:
+        return []
+    t, out = at.timestamp(), []
+    watch = [(f"project:{p['slug']}", p["name"]) for p in projects if p["managed"] and p["kind"] == "web"]
+    watch += [(f"link:{l['id']}", l["name"]) for l in links]
+    for hkey, name in watch:
+        h = health.state.get(hkey)
+        if not h or h["ok"] or not h.get("down_since") or t - h["down_since"] < DOWN_AFTER:
+            continue
+        since = datetime.fromtimestamp(h["down_since"], config.TZ)
+        out.append({"kind": "down", "key": f"down:{hkey}:{h['down_since']}", "icon": "alert", "title": f"{name} isn't answering",
+                    "detail": f"down since {since:%H:%M}" if since.date() == at.date() else f"down since {_day(since.date())}", "chip": "Down", "level": "soon"})
+    if monitor and monitor.mem_tight_since and t - monitor.mem_tight_since >= MEM_TIGHT_FOR and monitor.latest:
+        m = monitor.latest["mem"]
+        out.append({"kind": "system", "key": f"sys:mem:{at.date()}", "icon": "alert", "title": "This PC is short of memory",
+                    "detail": f"{m['available'] / 1024**3:.1f} GB RAM free · swap {round(100 * m['swap_used'] / m['swap_total'])}% full", "chip": "Memory", "level": "now"})
+    for d in low_disks():
+        out.append({"kind": "system", "key": f"sys:disk:{d['mount']}:{at.date()}", "icon": "alert", "title": f"Disk {d['mount']} is nearly full",
+                    "detail": f"{d['free'] / 1024**3:.0f} GB free of {d['total'] / 1024**3:.0f} GB", "chip": "Disk", "level": "soon"})
+    return out
 
 
 # ---- the full owner snapshot -------------------------------------------------------------------
 
-async def owner_state(health: Health, device: dict[str, Any], attention: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+async def owner_state(health: Health, device: dict[str, Any], attention: list[dict[str, Any]] | None = None,
+                      monitor: Monitor | None = None) -> dict[str, Any]:
     at = now()
     widgets = widgets_state()
+    projects, links = await projects_state(health), links_state(health)
     return {
         "now": at.isoformat(),
         "host": socket.gethostname(),
@@ -172,10 +321,11 @@ async def owner_state(health: Health, device: dict[str, Any], attention: list[di
         "version": __version__,
         "device": {"id": device["id"], "name": device["name"], "role": device["role"]},
         "widgets": widgets,
-        "projects": await projects_state(health),
-        "links": links_state(health),
+        "projects": projects,
+        "links": links,
         "health": health.state,
-        "alerts": [*compute_alerts(widgets, at), *(attention or [])],      # owner only: a sync that keeps failing is a thing to know about
+        # owner only: a sync that keeps failing, or a service that's down, is a thing to know about
+        "alerts": alert_settings.visible([*compute_alerts(widgets, at), *service_alerts(projects, links, health, monitor, at), *(attention or [])]),
         "appearance": {"themes": appearance.themes()},
     }
 
@@ -200,7 +350,7 @@ def kiosk_state() -> dict[str, Any]:
     all_widgets = widgets_state()
     alerts = []
     if tv["show_alerts"]:
-        for a in compute_alerts(all_widgets, at):
+        for a in alert_settings.visible(compute_alerts(all_widgets, at)):
             if (a["kind"] == "bin" and "bins" in allowed) or (a["kind"] == "event" and "diary" in allowed) or (a["kind"] == "gig" and "gigs" in allowed):
                 alerts.append(a)
     return {

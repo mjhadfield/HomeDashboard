@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import glob
 import logging
+import shutil
 import subprocess
+import time
 from typing import Any
 
 log = logging.getLogger("hub.monitor")
@@ -116,6 +118,33 @@ def _collect() -> dict[str, Any]:
 INTERVAL = 1.0   # background collection cadence — independent of how often any client polls the endpoint
 
 
+def memory_tight(mem: dict[str, int]) -> bool:
+    """Little RAM left *and* swap filling up — the state Odysseus once got the whole container oom-killed in."""
+    low_ram = mem["total"] and mem["available"] / mem["total"] < 0.10
+    swapping = mem["swap_total"] and mem["swap_used"] / mem["swap_total"] > 0.50
+    return bool(low_ram and swapping)
+
+
+DISKS = ("/", "/home")
+DISK_LOW_FRACTION, DISK_LOW_BYTES = 0.10, 15 * 1024**3
+
+
+def low_disks() -> list[dict[str, Any]]:
+    """Mounts running out of room (each distinct filesystem once: /home is often just part of /)."""
+    out, seen = [], set()
+    for mount in DISKS:
+        try:
+            u = shutil.disk_usage(mount)
+        except OSError:
+            continue
+        if (u.total, u.used) in seen:
+            continue
+        seen.add((u.total, u.used))
+        if u.free < DISK_LOW_BYTES or u.free / u.total < DISK_LOW_FRACTION:
+            out.append({"mount": mount, "free": u.free, "total": u.total})
+    return out
+
+
 class Monitor:
     """One instance per app lifespan (held on app.state, same pattern as Health/Scheduler) — not module-level
     state, since a module global would be shared (and its background task fought over) across the several
@@ -123,6 +152,7 @@ class Monitor:
 
     def __init__(self) -> None:
         self.latest: dict[str, Any] | None = None
+        self.mem_tight_since: float | None = None      # when memory_tight() started holding (None while it doesn't)
         self._task: asyncio.Task | None = None
         self._warned = False
 
@@ -131,6 +161,8 @@ class Monitor:
             try:
                 self.latest = await asyncio.to_thread(_collect)
                 self._warned = False
+                tight = memory_tight(self.latest["mem"])
+                self.mem_tight_since = (self.mem_tight_since or time.time()) if tight else None
             except asyncio.CancelledError:
                 raise
             except Exception:

@@ -256,6 +256,22 @@ def list_artists() -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def top_artists(limit: int) -> set[str]:
+    """Normalised names of the artists you care most about: every pinned one, plus the `limit` heaviest followed ones."""
+    with db() as con:
+        rows = con.execute("SELECT name FROM followed_artists WHERE status = 'pin' UNION "
+                           "SELECT name FROM (SELECT name FROM followed_artists WHERE status = 'follow' ORDER BY weight DESC LIMIT ?)", (limit,)).fetchall()
+    return {norm(r["name"]) for r in rows}
+
+
+def fresh_items(kind: str, since: int, artists: set[str]) -> list[dict[str, Any]]:
+    """Items first found since `since` that are still unread ('new') and by one of `artists` — newest first."""
+    with db() as con:
+        rows = con.execute("SELECT * FROM feed_items WHERE kind = ? AND status = 'new' AND first_seen >= ? ORDER BY first_seen DESC, id DESC",
+                           (kind, since)).fetchall()
+    return [{**_row_to_item(r), "first_seen": r["first_seen"]} for r in rows if norm(r["artist"]) in artists]
+
+
 FRESH_SECONDS = 20 * 3600          # an artist checked within this long is not looked at again: each is checked about once a day
 FORCED_SECONDS = 3600              # "Sync now" re-checks anything not looked at in the last hour (so double-clicking doesn't thrash a service)
 

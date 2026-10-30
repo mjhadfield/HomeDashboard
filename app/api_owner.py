@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, appearance, auth, config, db, notify, procs, schemas, state
+from . import __version__, alerts, appearance, auth, config, db, notify, procs, schemas, state
 from .bus import bus
 from .health import Health
 from .widgets import discover
@@ -30,7 +30,8 @@ SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 @router.get("/state")
 async def owner_state(request: Request):
-    return await state.owner_state(request.app.state.health, auth.current_device(request), maintenance.attention(request.app.state.scheduler))
+    return await state.owner_state(request.app.state.health, auth.current_device(request), maintenance.attention(request.app.state.scheduler),
+                                   request.app.state.monitor)
 
 
 @router.get("/events")
@@ -43,6 +44,36 @@ async def monitoring(request: Request):
     """CPU/GPU/memory stats — the latest reading from a background loop (app/monitor.py), polled directly by
     the frontend, deliberately outside the widget/state/SSE machinery."""
     return await request.app.state.monitor.snapshot()
+
+
+# ---- the reminder strip --------------------------------------------------------------------------
+
+@router.post("/alerts/dismiss")
+async def dismiss_alert(body: schemas.AlertKeyIn):
+    """Hide one reminder everywhere (TVs too). Its key names one occurrence, so next time's comes back by itself."""
+    alerts.dismiss(body.key)
+    notify.config()
+    return {"ok": True}
+
+
+@router.post("/alerts/restore")
+async def restore_alert(body: schemas.AlertKeyIn):
+    """Undo a dismissal."""
+    alerts.undismiss(body.key)
+    notify.config()
+    return {"ok": True}
+
+
+@router.get("/alerts/settings")
+async def get_alert_settings():
+    return alerts.settings()
+
+
+@router.put("/alerts/settings")
+async def put_alert_settings(body: schemas.AlertSettingsIn):
+    db.put_settings("alerts", body.model_dump())
+    notify.config()
+    return alerts.settings()
 
 
 # ---- project control ---------------------------------------------------------------------------
@@ -113,7 +144,7 @@ async def get_config(request: Request):
         "links": links, "projects": projects,
         "widgets": {wid: {"title": w.title, "settings": w.public_settings(db.get_settings(w.id, w.defaults))} for wid, w in discover().items()},
         "devices": [{**d, "current": d["id"] == me} for d in auth.list_devices() if not d["revoked"]],
-        "screens": state.tv_settings(), "tv_panels": list(schemas.TV_PANELS),
+        "screens": state.tv_settings(), "tv_panels": list(schemas.TV_PANELS), "alerts": alerts.settings(),
         "icons": schemas.ICONS, "streams": {k: v["title"] for k, v in STREAMS.items()}, "colours": ["violet", "silver", "indigo"],
         "appearance": {"themes": appearance.themes(), "base_panel": appearance.BASE_PANEL, "base_accent": appearance.BASE_ACCENT,
                        "fits": list(appearance.FITS), "max_background_mb": appearance.MAX_BACKGROUND // 1_000_000},

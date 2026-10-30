@@ -43,6 +43,10 @@ def parse_races(races: list[dict[str, Any]]) -> list[dict[str, Any]]:
         race = _epoch({"date": r.get("date"), "time": r.get("time")})
         firsts = [(e, label) for key, label in COMPETITIVE if (e := _epoch(r.get(key)))]
         first, first_label = min(firsts) if firsts else (race, "Race")
+        # Every session worth a "starting soon" reminder (practice isn't), in time order.
+        sessions = sorted(({"key": key, "label": label, "at": e} for key, label in COMPETITIVE if (e := _epoch(r.get(key)))), key=lambda x: x["at"])
+        if race:
+            sessions.append({"key": "Race", "label": "Race", "at": race})
         loc = (r.get("Circuit") or {}).get("Location") or {}
         name = r.get("raceName") or f"Round {rnd}"
         short = re.sub(r"\s+Grand Prix.*$", "", name).strip()
@@ -50,7 +54,8 @@ def parse_races(races: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # (the race itself is already caught as "… Grand Prix" / "… GP").
         venues = [v for v in {loc.get("locality"), (r.get("Circuit") or {}).get("circuitName")} if v]
         out.append({"round": rnd, "name": name, "short": f"{short} GP" if short != name else name, "race": race, "first_session": first,
-                    "first_label": first_label, "sprint": any(k in r for k in ("Sprint", "SprintQualifying", "SprintShootout")), "venues": sorted(venues)})
+                    "first_label": first_label, "sprint": any(k in r for k in ("Sprint", "SprintQualifying", "SprintShootout")), "venues": sorted(venues),
+                    "sessions": sessions})
     return sorted(out, key=lambda x: x["round"])
 
 

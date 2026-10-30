@@ -115,7 +115,17 @@ html.has-bg .frame-shell iframe { background: transparent; }    /* a custom them
 }
 .alert .i { color: var(--accent-soft); width: 20px; height: 20px; }
 .alert b { color: var(--silver-hi); font-weight: 600; }
-.alert__when { margin-left: auto; }
+.alert__text { min-width: 0; }
+.alert__text a { color: inherit; text-decoration: none; }
+.alert__text a:hover, .alert__text a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+.alert__when { margin-left: auto; flex: none; }
+.alert__x { flex: none; margin: -4px -6px -4px 0; opacity: .55; transition: opacity .2s; }
+.alert:hover .alert__x, .alert__x:focus-visible { opacity: 1; }
+.alert--info { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent); }
+.alert--undo { flex: 0 1 auto; color: var(--silver-dim); background: none; border-style: dashed; }
+.alert--undo .btn { margin-left: 8px; }
+.alerts__more { flex: none; align-self: stretch; }
+@media (hover: none) { .alert__x { opacity: 1; } }            /* phones: nothing to hover, so always show it */
 
 /* ---- Grid --------------------------------------------------------------- */
 .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); }

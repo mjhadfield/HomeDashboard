@@ -12,11 +12,11 @@ import os
 import shutil
 import sqlite3
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from . import config, content, db, logbook
+from . import alerts, config, content, db, logbook
 from .scheduler import Scheduler, describe, due_at, parse_hhmm, schedule_of
 from .widgets import discover
 from .widgets.base import Widget
@@ -96,7 +96,7 @@ PRUNE_DAYS = {"release": 400, "radar": 30, "vinyl": 120}
 
 def _do_tidy() -> dict[str, int]:
     now = int(time.time())
-    out = {"log_entries": logbook.prune(), "items": sum(content.prune(kind, older_than_days=days) for kind, days in PRUNE_DAYS.items())}
+    out = {"log_entries": logbook.prune(), "dismissed_alerts": alerts.prune(), "items": sum(content.prune(kind, older_than_days=days) for kind, days in PRUNE_DAYS.items())}
     with db.db() as con:
         out["expired_links"] = con.execute("DELETE FROM enrol_tokens WHERE expires_at < ? OR used = 1", (now,)).rowcount \
             + con.execute("DELETE FROM pairings WHERE expires_at < ?", (now,)).rowcount
@@ -242,6 +242,6 @@ def attention(scheduler: Scheduler) -> list[dict[str, Any]]:
     out = []
     for j in overview(scheduler)["jobs"]:
         if j["status"] == "failing" and j["streak"] >= 2 or j["status"] == "stale":
-            out.append({"kind": "maintenance", "icon": "alert", "title": f"{j['title']} needs attention",
+            out.append({"kind": "maintenance", "key": f"maintenance:{j['id']}:{date.today()}", "icon": "alert", "title": f"{j['title']} needs attention",
                         "detail": (j["message"] or "hasn't synced for a while")[:140], "chip": "Settings", "level": "soon"})
     return out

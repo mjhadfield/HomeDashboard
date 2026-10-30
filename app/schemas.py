@@ -155,6 +155,20 @@ TV_PANELS = ("bins", "diary", "gigs")
 TV_DEFAULTS: dict[str, Any] = {"panels": ["bins"], "rotate_seconds": 12, "show_alerts": True}
 
 
+class AlertKeyIn(BaseModel):
+    key: str = Field(min_length=1, max_length=400)
+
+
+class AlertSettingsIn(BaseModel):
+    """Settings → Notifications: which of the newer reminder kinds show, and how many top artists count for 'fresh'."""
+    releases: bool = True
+    f1: bool = True
+    onsale: bool = True
+    fresh: bool = True
+    down: bool = True
+    top_artists: int = Field(50, ge=1, le=500)
+
+
 class ScreensIn(BaseModel):
     panels: list[Literal["bins", "diary", "gigs"]] = Field(default_factory=list, max_length=6)
     rotate_seconds: int = Field(12, ge=5, le=300)

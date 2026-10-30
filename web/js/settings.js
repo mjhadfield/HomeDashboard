@@ -180,6 +180,25 @@ function binsCard() {
       <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="bins"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
+// The reminder strip along the top of Home. Bins have their own choice above; these are the other kinds.
+const ALERT_KINDS = [
+  ['releases', 'Album releases', 'The day before and the day an album on the Releases card comes out.'],
+  ['f1', 'F1 sessions', 'From three hours before qualifying, a sprint or the race. Session names only, never results.'],
+  ['onsale', 'Ticket on-sales', 'When tickets (or a presale) for a gig on your radar go on sale today or tomorrow.'],
+  ['fresh', 'Fresh announcements', 'A newly announced album, gig or vinyl pre-order by one of your top artists, for a day.'],
+  ['down', 'Something’s down', 'A running project or a Launchpad service that has stopped answering for 10 minutes, or this PC short of memory or disk.'],
+];
+
+function notificationsCard() {
+  const s = cfg.alerts;
+  return card('Notifications — the reminder strip',
+    'Reminders along the top of Home. Each one has a ✕ to dismiss it everywhere, TVs included; next time’s (next week’s bin, the next race) still shows.',
+    `<form class="form" data-form="alerts" style="padding:0 18px 12px">
+      <div class="checks"><span class="field__l">Remind me about</span>${ALERT_KINDS.map(([k, t, hint]) => check(`al_${k}`, t, s[k], hint)).join('')}</div>
+      <div class="form-grid" style="margin-top:14px">${field('“Top artists” for fresh announcements', input('top_artists', s.top_artists, 'type="number" min="1" max="500"'), 'Every pinned artist, plus this many of your most-played followed artists.')}</div>
+      <div class="form-actions"><button class="btn btn--solid" type="submit">Save</button></div></form>`);
+}
+
 const calRow = (c = {}) => `<div class="cal-row" data-cal data-id="${esc(c.id || '')}">
   ${field('Name', input('cal_name', c.name || 'Calendar', 'maxlength="40"'))}
   ${field('Colour', select('cal_colour', cfg.colours, c.colour || 'violet'))}
@@ -666,7 +685,7 @@ function aboutTab() {
 function render() {
   if (editing?.kind !== 'theme') useTheme(chosen(), cfg.appearance.themes);     // ends any live preview; picks up edits made elsewhere
   $('#tabs').innerHTML = TABS.map(([id, label, icon]) => `<button role="tab" data-tab="${id}" aria-selected="${id === tab}"${id === 'maintenance' && needsAttention() ? ' class="has-attn"' : ''}>${ico(icon)}${esc(label)}</button>`).join('');
-  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), listen: musicPageTab, news: newsTab, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
+  panel.innerHTML = { links: linksTab, projects: projectsTab, widgets: () => shortcutsCard() + binsCard() + notificationsCard() + diaryCard(), appearance: appearanceTab, music: () => gigsCard() + artistsCard() + releasesCard() + vinylCard() + purchasesCard() + radarCard(), listen: musicPageTab, news: newsTab, screens: () => screensCard() + pairCard() + devicesCard() + enrolCard(), maintenance: maintenanceTab, about: aboutTab }[tab]();
 }
 
 async function load() {
@@ -927,6 +946,8 @@ panel.addEventListener('submit', e => {
     run(async () => { await api.post('/api/owner/vinyl/preorders', body); }, 'Added — see Confirmed Pre-orders on Vinyl radar');
   } else if (kind === 'artist-add') {
     run(async () => { await api.post('/api/owner/artists', { name: val(f, 'name') }); }, 'Following — checking for new music');
+  } else if (kind === 'alerts') {
+    run(() => api.put('/api/owner/alerts/settings', { ...Object.fromEntries(ALERT_KINDS.map(([k]) => [k, on(f, `al_${k}`)])), top_artists: Number(val(f, 'top_artists')) || 50 }), 'Saved');
   } else if (kind === 'releases') {
     run(() => api.put('/api/owner/widgets/releases/settings', { lookback_days: Number(val(f, 'lookback_days')), horizon_days: Number(val(f, 'horizon_days')), batch: Number(val(f, 'batch')), types: ['Album', 'EP', 'Single'].filter(t => on(f, `type_${t}`)), include_extras: on(f, 'include_extras') }), 'Saved');
   } else if (kind === 'vinyl') {

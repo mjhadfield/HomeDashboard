@@ -72,12 +72,19 @@ def parse_ticketmaster(data: dict[str, Any], artist: str) -> list[dict[str, Any]
         status = ((ev.get("dates") or {}).get("status") or {}).get("code", "")
         if not start.get("localDate") or status == "cancelled" or not str(ev.get("url", "")).startswith(("https://", "http://")):
             continue
+        sales = ev.get("sales") or {}
+        public = sales.get("public") or {}
+        onsale = public.get("startDateTime") if not public.get("startTBD") and not public.get("startTBA") else None
+        presales = sorted((p for p in sales.get("presales") or [] if p.get("startDateTime")), key=lambda p: p["startDateTime"])
         venues = (ev.get("_embedded") or {}).get("venues") or [{}]
         venue, city = venues[0].get("name", ""), (venues[0].get("city") or {}).get("name", "")
         out.append({"external_id": ev["id"], "artist": artist, "title": name, "subtitle": ", ".join(x for x in (venue, city) if x),
                     "url": ev["url"], "date": start["localDate"],
                     "meta": {"time": (start.get("localTime") or "")[:5], "venue": venue, "city": city, "status": status,
-                             "tribute": looks_like_tribute(ev, attractions_raw, artist)}})
+                             "tribute": looks_like_tribute(ev, attractions_raw, artist),
+                             # When tickets go on sale (UTC ISO times, for the reminder strip). Each presale is kept, since
+                             # only the ones still ahead are of any use and which those are changes daily.
+                             "onsale": onsale, "presales": [{"at": p["startDateTime"], "name": p.get("name") or "Presale"} for p in presales]}})
     return out
 
 
