@@ -1,7 +1,7 @@
 // The content cards: Next gig, Releases, Vinyl radar, Gig radar. (News has its own page: news.js.)
 // Every row can be pinned, dismissed, or its artist muted; the expanded view adds filters, search and a
 // "Dismissed" list you can restore from. Everything from the network passes through esc()/safeUrl().
-import { esc, ico, safeUrl, fmtDay, fmtDMY, relDays, hhmm, parseDate } from './util.js';
+import { esc, ico, safeUrl, fmtDay, fmtDMY, relDays, hhmm, parseDate, gcalUrl } from './util.js';
 
 const COVERS = ['', 'cover--b', 'cover--c', 'cover--d'];
 const initial = s => (String(s || '?').trim()[0] || '?').toUpperCase();
@@ -109,8 +109,14 @@ function plainRow(it, k, hide) {                              // no cover: gig r
     ? '<div class="feed__flag"><span class="chip chip--warn" title="Ticketmaster lists this as a tribute/cover act, or its name says so">Tribute act</span></div>' : '';
   return `<li class="feed${it.status === 'new' ? ' feed--new' : ''}${it.status === 'pinned' ? ' feed--pinned' : ''}${hide ? ' more' : ''}"${hide ? ' hidden' : ''}>
     <div class="feed__main"><div class="feed__title">${link(it, it.artist || it.title)}</div><div class="feed__sub">${esc(it.subtitle)}</div>${tribute}</div>
-    <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}<div class="feed__date">${esc(niceDate(it.date))}${esc(t)}</div>${acts(it)}</div></li>`;
+    <div class="feed__meta">${it.status === 'new' ? '<span class="chip chip--fresh">New</span>' : ''}<div class="feed__date">${esc(niceDate(it.date))}${esc(t)}</div>${acts(it, bookAct(it))}</div></li>`;
 }
+
+// Booked: opens the quick form (app.js → openBooking), filled in from what Ticketmaster said, which turns the show into
+// a booked gig and opens it as a new Google Calendar event.
+const bookAct = it => `<button class="btn btn--icon" data-item-act="book" data-id="${it.id}" data-artist="${esc(it.artist || it.title)}"
+  data-venue="${esc(it.meta?.venue || '')}" data-city="${esc(it.meta?.city || '')}" data-gig-day="${/^\d{4}-\d{2}-\d{2}$/.test(it.date || '') ? esc(it.date) : ''}"
+  data-time="${esc(it.meta?.time || '')}" data-url="${esc(safeUrl(it.url) === '#' ? '' : it.url)}" aria-label="Booked" title="Booked — add to Gigs and your diary">${ico('cal')}</button>`;
 
 // ---- filtering (expanded view) --------------------------------------------------------------------------------------
 export function narrow(data, ctx, todayIso, extra = {}) {
@@ -226,8 +232,10 @@ function radar(s, ctx) {
 function gigLine(g, past = false) {
   const where = [g.venue, g.city].filter(Boolean).join(', ');
   const tix = g.ticket_url ? ` <a class="feed__link" href="${esc(safeUrl(g.ticket_url))}" target="_blank" rel="noopener">tickets</a>` : '';
+  // A booked gig can be (re)added to the diary any time — for one typed in Settings, or if the Google tab was closed unsaved.
+  const diary = past ? '' : ` <a class="feed__link" href="${esc(gcalUrl(g))}" target="_blank" rel="noopener" title="Add to Google Calendar">diary</a>`;
   return `<li class="gigline"><span class="gigline__d mono">${esc(fmtDay(g.date))}</span>
-    <div class="gigline__main"><b>${esc(g.artist)}</b><div class="gigline__sub">${esc(where)}${g.doors ? ` · doors ${esc(g.doors)}` : ''}${g.notes ? ` · ${esc(g.notes)}` : ''}${tix}</div></div>
+    <div class="gigline__main"><b>${esc(g.artist)}</b><div class="gigline__sub">${esc(where)}${g.doors ? ` · doors ${esc(g.doors)}` : ''}${g.notes ? ` · ${esc(g.notes)}` : ''}${tix}${diary}</div></div>
     <span class="chip">${past ? esc(`${-g.in_days}d ago`) : esc(relDays(g.in_days))}</span></li>`;
 }
 
@@ -249,7 +257,7 @@ function gigs(s, ctx) {
     meta: `${d.count} booked`,
     body: `<div class="hero"><span class="hero__count">${hero.count}</span><span class="hero__unit">${hero.unit}</span></div>
       <div class="hero__name">${esc(n.artist)}</div>
-      <div class="hero__sub">${esc(where)} · ${esc(fmtDay(n.date))}${n.doors ? ` · doors ${esc(n.doors)}` : ''}</div>
+      <div class="hero__sub">${esc(where)} · ${esc(fmtDay(n.date))}${n.doors ? ` · doors ${esc(n.doors)}` : ''} · <a class="feed__link" href="${esc(gcalUrl(n))}" target="_blank" rel="noopener" title="Add to Google Calendar">diary</a></div>
       ${others}${expandedList}`,
   };
 }

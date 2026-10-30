@@ -3,7 +3,7 @@ import * as api from './api.js';
 import { cards, ui, selectedSlug } from './cards.js';
 import { vinylUi } from './content-cards.js';
 import { Shell } from './shell.js';
-import { $, $$, esc, hostUrl, ico, safeUrl, tickClock, tickUptimes, toast } from './util.js';
+import { $, $$, esc, gcalUrl, hostUrl, ico, safeUrl, tickClock, tickUptimes, toast } from './util.js';
 import { BUILTIN, chosen, currentLook, currentTheme, specOf, syncThemes, useTheme } from './theme.js';
 import * as music from './music.js';
 import * as news from './news.js';
@@ -274,6 +274,53 @@ async function load() {
 let debounce;
 const changed = () => { clearTimeout(debounce); debounce = setTimeout(load, 250); };
 
+// ---- Gig radar → Booked ----------------------------------------------------------------------------------
+// A quick form filled in from Ticketmaster; saving makes it a booked gig (off the radar, onto the Gigs card) and, if
+// ticked, opens it as a new Google Calendar event — the Diary card reads that calendar, so it shows up there too.
+const bookDlg = $('#book-gig');
+const bookForm = bookDlg.querySelector('form');
+const bookErr = bookDlg.querySelector('.book__error');
+let bookingId = null;
+
+function openBooking(d) {
+  bookingId = d.id;
+  bookForm.reset();
+  const f = bookForm.elements;
+  f.artist.value = d.artist || '';
+  f.date.value = d.gigDay || '';
+  f.venue.value = d.venue || '';
+  f.city.value = d.city || '';
+  f.doors.value = /^\d{2}:\d{2}$/.test(d.time || '') ? d.time : '';
+  f.ticket_url.value = d.url || '';
+  bookErr.hidden = true;
+  bookDlg.showModal();
+  f.notes.focus();
+}
+
+bookDlg.querySelector('[data-book-cancel]').addEventListener('click', () => bookDlg.close());
+bookForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = bookForm.elements;
+  const body = { artist: f.artist.value.trim(), date: f.date.value, venue: f.venue.value.trim(), city: f.city.value.trim(),
+                 doors: f.doors.value, ticket_url: f.ticket_url.value.trim() || null, notes: f.notes.value.trim() };
+  if (!body.artist || !body.date) { bookErr.textContent = 'An artist and a date are needed.'; bookErr.hidden = false; return; }
+  // Opened now, inside the click, or the popup blocker stops it; pointed at Google once the gig is safely saved.
+  const tab = f.diary.checked ? window.open('about:blank', '_blank') : null;
+  try {
+    await api.post(`/api/owner/radar/${bookingId}/book`, body);
+  } catch (err) {
+    tab?.close();
+    bookErr.textContent = err.message;
+    bookErr.hidden = false;
+    return;
+  }
+  if (tab) { tab.opener = null; tab.location.href = gcalUrl(body); }
+  const blocked = f.diary.checked && !tab;
+  bookDlg.close();
+  toast(blocked ? `Booked — added to Gigs. The Google Calendar tab was blocked: use “diary” on the Gigs card` : `Booked — ${body.artist} added to Gigs`);
+  await load();
+});
+
 // ---- start / stop -----------------------------------------------------------------------------------------
 document.addEventListener('click', async e => {
   const themeToggle = e.target.closest('[data-theme-toggle]');
@@ -303,6 +350,7 @@ document.addEventListener('click', async e => {
     // element with a plain [data-date] attribute once a second to redraw the Now card's clock, and would stomp
     // this button's own icon the same way it did before this was renamed to data-release-date.
     const { itemAct, id, to, artist, releaseDate, title } = curate.dataset;
+    if (itemAct === 'book') { openBooking(curate.dataset); return; }
     // Purchased (moves a listing to Confirmed Pre-orders) and both pre-order resolutions are one-way enough to
     // warrant a pause; dismiss/pin/seen stay instant, same as everywhere else in the app.
     const prompts = {

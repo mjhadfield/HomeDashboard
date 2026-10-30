@@ -259,6 +259,25 @@ async def create_gig(body: GigIn):
     return {"id": gid}
 
 
+@router.post("/radar/{item_id}/book", status_code=201)
+async def book_from_radar(item_id: int, body: GigIn):
+    """Gig radar → Booked: the show becomes a booked gig and leaves the radar (status 'purchased', which list_items
+    already hides — and with it the show's on-sale reminders). One transaction, so it never half-happens. The diary
+    entry is the browser's job: it opens a filled-in Google Calendar event, as the Diary card can only read."""
+    with db.db() as con:
+        row = con.execute("SELECT kind, status FROM feed_items WHERE id = ?", (item_id,)).fetchone()
+        if not row or row["kind"] != "radar":
+            raise HTTPException(404, "no such show on the radar")
+        if row["status"] == "purchased":
+            raise HTTPException(409, "that show is already booked")
+        gid = con.execute("INSERT INTO gigs (artist, venue, city, date, doors, ticket_url, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                          (*_gig_values(body), int(time.time()))).lastrowid
+        con.execute("UPDATE feed_items SET status = 'purchased' WHERE id = ?", (item_id,))
+    notify.widget("gigs")
+    notify.widget("radar")
+    return {"id": gid}
+
+
 @router.put("/gigs/{gig_id}")
 async def update_gig(gig_id: int, body: GigIn):
     with db.db() as con:

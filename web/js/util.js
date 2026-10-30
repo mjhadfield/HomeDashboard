@@ -23,6 +23,26 @@ export const fmtDMY = iso => { const [y, m, d] = String(iso || '').split('-'); r
 export const relDays = n => (n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`);
 export const hhmm = epoch => { const d = new Date(epoch * 1000); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 
+/** Google Calendar's own "new event" page, filled in for a gig — the Diary card can only read the calendar, so adding
+ *  one is a click on Save there. With a time (doors, or Ticketmaster's start) it runs four hours, past midnight if need
+ *  be; without one it's an all-day event. */
+export function gcalUrl({ artist, venue, city, date, doors, notes, ticket_url }) {
+  const stamp = (d, withTime) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` + (withTime ? `T${pad(d.getHours())}${pad(d.getMinutes())}00` : '');
+  const day = parseDate(date);
+  let dates;
+  if (/^\d{2}:\d{2}$/.test(doors || '')) {
+    const [h, m] = doors.split(':').map(Number);
+    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m);
+    dates = `${stamp(start, true)}/${stamp(new Date(start.getTime() + 4 * 3600e3), true)}`;
+  } else {
+    dates = `${stamp(day)}/${stamp(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1))}`;
+  }
+  const details = [notes, doors ? `Doors ${doors}` : '', ticket_url ? `Tickets: ${ticket_url}` : ''].filter(Boolean).join('\n');
+  const q = new URLSearchParams({ action: 'TEMPLATE', text: `${artist} (gig)`, dates, ctz: 'Europe/London',
+    location: [venue, city].filter(Boolean).join(', '), details });
+  return `https://calendar.google.com/calendar/render?${q}`;
+}
+
 export function bytes(n) {
   const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
   let i = 0;

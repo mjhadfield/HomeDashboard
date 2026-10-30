@@ -605,3 +605,23 @@ body.has-max::before { content: ""; position: fixed; inset: 0; z-index: 80; back
 .tm__sw img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .75; }
 .tm__sw--dark { --sw-bg: #0e0b14; --sw-ac: #8b5cf6; }
 .tm__sw--light { --sw-bg: #f8f0e2; --sw-ac: #b5541f; }
+
+/* ---- Gig radar → Booked: the quick form (field/input/check rules copied from settings.css, which isn't loaded here) ---- */
+.book { width: min(620px, calc(100vw - 32px)); padding: 22px 24px; color: var(--silver); background: var(--surface); border: 1px solid var(--edge-strong); }
+.book::backdrop { background: var(--vignette); backdrop-filter: blur(2px); }
+.book__title { margin: 0 0 16px; font: 600 15px/1.2 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--silver-hi); }
+.book__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 18px; }
+.book__field { display: grid; gap: 6px; align-content: start; }
+.book__field--wide { grid-column: 1 / -1; }
+.book__field > span { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--silver-mute); }
+.book__field input { width: 100%; padding: 9px 11px; font: 13px/1.4 var(--font-mono); color: var(--silver-hi); background: var(--well); border: 1px solid var(--edge); border-radius: 0; outline: none; transition: border-color .2s, box-shadow .2s; }
+.book__field input:focus { border-color: var(--edge-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-hi) 16%, transparent); }
+.book__field input::placeholder { color: var(--silver-dim); }
+.book__check { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; cursor: pointer; }
+.book__check small { font-size: 12.5px; color: var(--silver-dim); }
+.book__check input { appearance: none; width: 18px; height: 18px; margin: 0; display: grid; place-items: center; background: var(--well); border: 1px solid var(--edge); cursor: pointer; transition: border-color .2s, background .2s; }
+.book__check input:checked { background: var(--accent-deep); border-color: var(--accent-hi); }
+.book__check input:checked::after { content: ""; width: 9px; height: 5px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.book__check input:focus-visible { outline: 1px solid var(--accent-hi); outline-offset: 2px; }
+.book__error { margin: 14px 0 0; font-size: 13px; color: var(--bad); }
+.book__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }

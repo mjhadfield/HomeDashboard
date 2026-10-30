@@ -65,6 +65,24 @@
   <a href="#ai" data-view="ai"><svg class="i"><use href="#i-spark"/></svg>Odysseus</a>
 </nav>
 
+<dialog class="book" id="book-gig" aria-labelledby="book-gig-title">
+  <form class="book__form" novalidate>
+    <h2 class="book__title" id="book-gig-title">Booked a gig</h2>
+    <div class="book__grid">
+      <label class="book__field"><span>Artist</span><input name="artist" required maxlength="80"></label>
+      <label class="book__field"><span>Date</span><input name="date" type="date" required></label>
+      <label class="book__field"><span>Venue</span><input name="venue" maxlength="80"></label>
+      <label class="book__field"><span>City</span><input name="city" maxlength="60"></label>
+      <label class="book__field"><span>Doors (optional)</span><input name="doors" type="time"></label>
+      <label class="book__field"><span>Ticket link (optional)</span><input name="ticket_url" type="url" maxlength="500" placeholder="https://…"></label>
+      <label class="book__field book__field--wide"><span>Notes (optional)</span><input name="notes" maxlength="200" placeholder="e.g. block B, meeting Sam at 5"></label>
+      <label class="book__check book__field--wide"><input name="diary" type="checkbox" checked> Add to Google Calendar <small>(opens a new tab: press Save there)</small></label>
+    </div>
+    <p class="book__error" role="alert" hidden></p>
+    <div class="book__actions"><button class="btn" type="button" data-book-cancel>Cancel</button><button class="btn btn--solid" type="submit">Save gig</button></div>
+  </form>
+</dialog>
+
 <script type="module" src="/static/js/icons.js"></script>
 <script type="module" src="/static/js/app.js"></script>
 </body>

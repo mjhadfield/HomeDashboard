@@ -37,7 +37,8 @@ def test_guests_cannot_touch_any_content_route(guest_client):
     for method, path, body in (("post", "/artists", {"name": "X"}), ("patch", "/artists/1", {"status": "mute"}), ("delete", "/artists/1", None),
                                ("post", "/artists/resync", None), ("post", "/gigs", GIG), ("put", "/gigs/1", GIG), ("delete", "/gigs/1", None),
                                ("post", "/items/1/status", {"status": "seen"}), ("post", "/items/mark-seen/news", None), ("post", "/items/1/read", None),
-                               ("patch", "/items/1/date", {"date": None}), ("delete", "/items/1", None), ("post", "/vinyl/preorders", {"artist": "X", "title": "Y"})):
+                               ("patch", "/items/1/date", {"date": None}), ("delete", "/items/1", None), ("post", "/vinyl/preorders", {"artist": "X", "title": "Y"}),
+                               ("post", "/radar/1/book", GIG)):
         r = getattr(guest_client, method)(BASE + path, headers=h, **({"json": body} if body is not None else {}))
         assert r.status_code == 403, (method, path)
 
@@ -175,6 +176,29 @@ def test_gig_crud_and_validation(owner_client):
     assert owner_client.put("/api/owner/gigs/99999", json=GIG).status_code == 404
     assert owner_client.delete(f"{BASE}/gigs/{gid}").status_code == 200
     assert owner_client.delete(f"{BASE}/gigs/{gid}").status_code == 404
+
+
+def test_booking_a_radar_show_makes_a_gig_and_takes_it_off_the_radar(owner_client):
+    content.upsert_items("radar", "ticketmaster", [{"external_id": "tm1", "artist": "Gojira", "title": "Gojira", "date": local_date(30)}], baseline=True)
+    iid = content.list_items("radar")["items"][0]["id"]
+    for bad in ({"date": "tomorrow"}, {"doors": "7pm"}, {"artist": ""}):           # a refused form changes nothing
+        assert owner_client.post(f"{BASE}/radar/{iid}/book", json={**GIG, **bad}).status_code == 422, bad
+    assert content.list_gigs() == [] and content.list_items("radar")["total"] == 1
+
+    r = owner_client.post(f"{BASE}/radar/{iid}/book", json={**GIG, "date": local_date(30)})
+    assert r.status_code == 201
+    gig = content.list_gigs()[0]
+    assert gig["id"] == r.json()["id"] and gig["artist"] == "Gojira" and gig["notes"] == "block B" and gig["date"] == local_date(30)
+    assert content.list_items("radar")["total"] == 0
+    state = owner_client.get(f"{BASE}/state").json()
+    assert state["widgets"]["gigs"]["data"]["next"]["artist"] == "Gojira"
+
+    assert owner_client.post(f"{BASE}/radar/{iid}/book", json=GIG).status_code == 409    # booked twice
+    assert owner_client.post(f"{BASE}/radar/99999/book", json=GIG).status_code == 404
+    content.upsert_items("news", "f", [{"external_id": "n1", "title": "A story", "date": "2026-09-20"}], baseline=False)
+    nid = content.list_items("news")["items"][0]["id"]
+    assert owner_client.post(f"{BASE}/radar/{nid}/book", json=GIG).status_code == 404      # only radar shows can be booked
+    assert len(content.list_gigs()) == 1
 
 
 def alerts(c):
