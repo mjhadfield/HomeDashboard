@@ -187,7 +187,7 @@ export function preorderRowWith(it, lead) {
     <div class="feed__main">
       <div class="vin__artist" title="${esc(it.artist || '')}">${it.artist ? (hasUrl ? link(it, it.artist) : esc(it.artist)) : ''}</div>
       <div class="vin__album" title="${esc(it.title)}">${hasUrl ? link(it, it.title) : esc(it.title)}</div>
-      <div class="vin__facts">${esc(m.variant || m.format || '')}</div></div>
+      <div class="vin__facts">${esc([m.variant || m.format, m.shop].filter(Boolean).join(' · '))}</div></div>
     <div class="feed__meta">
       <div class="preorder__row">${daysBadge(it.in_days)}
         <input type="date" class="preorder-date" data-preorder-date="${it.id}" value="${it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : ''}" aria-label="Release date — leave blank if TBC"></div>

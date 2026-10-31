@@ -38,6 +38,7 @@ def test_guests_cannot_touch_any_content_route(guest_client):
                                ("post", "/artists/resync", None), ("post", "/gigs", GIG), ("put", "/gigs/1", GIG), ("delete", "/gigs/1", None),
                                ("post", "/items/1/status", {"status": "seen"}), ("post", "/items/mark-seen/news", None), ("post", "/items/1/read", None),
                                ("patch", "/items/1/date", {"date": None}), ("delete", "/items/1", None), ("post", "/vinyl/preorders", {"artist": "X", "title": "Y"}),
+                               ("put", "/vinyl/preorders/1", {"artist": "X", "title": "Y"}),
                                ("post", "/radar/1/book", GIG)):
         r = getattr(guest_client, method)(BASE + path, headers=h, **({"json": body} if body is not None else {}))
         assert r.status_code == 403, (method, path)
@@ -100,6 +101,47 @@ def test_manual_purchase_endpoint_creates_a_confirmed_preorder(owner_client, mon
     assert p["artist"] == "Ghost" and p["source"] == "manual" and p["meta"]["image"] == "/covers/fake.jpg"
 
     assert owner_client.post(f"{BASE}/vinyl/preorders", json={**body, "image_url": "not a url"}).status_code == 422
+
+
+def test_editing_a_store_preorder_survives_the_stores_next_sync(owner_client, monkeypatch):
+    async def fake_cover(url):
+        return "/covers/mi.jpg"
+    monkeypatch.setattr(vinyl, "fetch_manual_cover", fake_cover)
+
+    listing = {"external_id": "earache:trivium:citg", "artist": "Trivium", "title": "Crown In The Grave", "url": "https://earache.com/products/citg",
+               "date": "2026-11-20", "meta": {"shop": "Earache", "format": "2×LP", "image": "https://cdn.shopify.com/earache.jpg"}}
+    content.upsert_items("vinyl", "earache", [listing], baseline=True)
+    iid = content.list_items("vinyl")["items"][0]["id"]
+    owner_client.post(f"{BASE}/items/{iid}/status", json={"status": "purchased"})
+
+    body = {"artist": "Trivium", "title": "Crown In The Grave", "variant": "Metal Injection exclusive", "shop": "Metal Injection",
+            "date": "2026-11-20", "product_url": "https://store.metalinjection.net/products/citg", "image_url": "https://cdn.shopify.com/mi.jpg"}
+    r = owner_client.put(f"{BASE}/vinyl/preorders/{iid}", json=body)
+    assert r.status_code == 200 and r.json()["cover"] is True
+
+    content.upsert_items("vinyl", "earache", [listing], baseline=False)          # Earache still lists it the next night
+    p = content.list_purchased("vinyl")[0]
+    assert p["url"] == body["product_url"] and p["meta"]["shop"] == "Metal Injection" and p["meta"]["variant"] == "Metal Injection exclusive"
+    assert p["meta"]["image"] == "/covers/mi.jpg" and p["meta"]["format"] == "2×LP"
+    with db.db() as con:
+        assert con.execute("SELECT date_set FROM feed_items WHERE id = ?", (iid,)).fetchone()[0] == 0   # unchanged date isn't frozen as hand-set
+
+
+def test_editing_a_preorder_keeps_the_cover_unless_a_new_one_is_fetched(owner_client, monkeypatch):
+    async def failing_cover(url):
+        return ""
+    monkeypatch.setattr(vinyl, "fetch_manual_cover", failing_cover)
+    iid = content.add_manual_purchase("vinyl", artist="System Of A Town", title="Toxicity", variant="", date=None, image="/covers/old.jpg")
+    body = {"artist": "System Of A Down", "title": "Toxicity", "date": "2026-11-20"}
+    assert owner_client.put(f"{BASE}/vinyl/preorders/{iid}", json=body).json()["cover"] is None
+    assert owner_client.put(f"{BASE}/vinyl/preorders/{iid}", json={**body, "image_url": "https://example.com/x.jpg"}).json()["cover"] is False
+    p = content.list_purchased("vinyl")[0]
+    assert p["artist"] == "System Of A Down" and p["date"] == "2026-11-20" and p["meta"]["image"] == "/covers/old.jpg"
+    assert owner_client.put(f"{BASE}/vinyl/preorders/{iid}", json={**body, "product_url": "nope"}).status_code == 422
+    assert owner_client.put(f"{BASE}/vinyl/preorders/99999", json=body).status_code == 404
+    content.upsert_items("vinyl", "shop-a", [{"external_id": "1", "artist": "Ghost", "title": "Skeletá"}], baseline=True)
+    unbought = content.list_items("vinyl")["items"][0]["id"]
+    assert owner_client.put(f"{BASE}/vinyl/preorders/{unbought}", json=body).status_code == 404     # only confirmed pre-orders
 
 
 def test_a_preorder_within_seven_days_raises_a_reminder_with_a_persistent_badge_outside_it(owner_client):

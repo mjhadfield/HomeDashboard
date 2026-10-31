@@ -289,16 +289,32 @@ function vinylCard() {
       <div class="form-actions">${act('refresh-widget', 'Sync now', 'data-id="vinyl"')}<button class="btn btn--solid" type="submit">Save</button></div></form>`);
 }
 
+const FULL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The add form and the edit form are the same fields; editing fills them in, and a blank cover keeps the current one. */
+function preorderForm(p = null) {
+  const m = p?.meta || {};
+  return `<form class="form" data-form="purchase" data-id="${p ? p.id : ''}"${p ? '' : ' style="padding:0 18px 12px"'}><div class="form-grid">
+      ${field('Artist', input('artist', p?.artist || '', 'required maxlength="80"'))}
+      ${field('Title', input('title', p?.title || '', 'required maxlength="200"'))}
+      ${field('Variant (optional)', input('variant', m.variant || '', 'maxlength="120" placeholder="e.g. Ltd. clear vinyl"'))}
+      ${field('Bought from (optional)', input('shop', m.shop || '', 'maxlength="60" placeholder="e.g. Metal Injection"'))}
+      ${field('Release date (optional — leave blank if TBC)', input('date', p?.date && FULL_DATE.test(p.date) ? p.date : '', 'type="date"'))}
+      ${field('Store/product page link (optional)', input('product_url', p?.url || '', 'type="url" placeholder="https://…"'), '', 'wide')}
+      ${field(p ? 'New cover image address (optional)' : 'Cover image address (optional)', input('image_url', '', `type="url" placeholder="${p ? (m.image ? 'leave blank to keep the current cover' : 'https://…') : 'https://…'}"`), '', 'wide')}
+      </div><div class="form-actions">${p ? act('cancel', 'Cancel') : ''}<button class="btn btn--solid" type="submit">${p ? 'Save changes' : 'Add purchase'}</button></div></form>`;
+}
+
 function purchasesCard() {
-  return card('Vinyl pre-orders — add a purchase', 'Records bought elsewhere. They appear under Confirmed Pre-orders on the Vinyl radar tile.',
-    `<form class="form" data-form="purchase" style="padding:0 18px 12px"><div class="form-grid">
-      ${field('Artist', input('artist', '', 'required maxlength="80"'))}
-      ${field('Title', input('title', '', 'required maxlength="200"'))}
-      ${field('Variant (optional)', input('variant', '', 'maxlength="120" placeholder="e.g. Ltd. clear vinyl"'))}
-      ${field('Release date (optional — leave blank if TBC)', input('date', '', 'type="date"'))}
-      ${field('Store/product page link (optional)', input('product_url', '', 'type="url" placeholder="https://…"'), '', 'wide')}
-      ${field('Cover image address (optional)', input('image_url', '', 'type="url" placeholder="https://…"'), '', 'wide')}
-      </div><div class="form-actions"><button class="btn btn--solid" type="submit">Add purchase</button></div></form>`);
+  const list = live?.vinyl?.data?.preorders || [];
+  const rows = list.map(p => editing?.kind === 'preorder' && editing.id === p.id ? `<li class="item item--edit">${preorderForm(p)}</li>`
+    : `<li class="item"><span class="item__icon">${ico('disc')}</span>
+        <div class="item__main"><b>${esc(p.artist || '')}${p.artist ? ' — ' : ''}${esc(p.title)}</b>
+          <div class="item__sub">${esc([p.meta?.variant || p.meta?.format, p.meta?.shop, p.date || 'TBC'].filter(Boolean).join(' · '))}</div></div>
+        <div class="item__acts">${act('edit-preorder', 'Edit', `data-id="${p.id}"`)}</div></li>`).join('');
+  return card('Vinyl pre-orders', 'Your confirmed pre-orders — correct one if it was bought somewhere else or as a different variant; a store’s later syncs won’t undo it. Below, add a record bought from a store that isn’t tracked.',
+    `<ul class="items">${rows || '<li class="item"><span class="field__h">No confirmed pre-orders yet.</span></li>'}</ul>
+     <div class="field__l" style="padding:14px 18px 6px">Add a purchase</div>${preorderForm()}`);
 }
 
 function radarCard() {
@@ -790,6 +806,7 @@ panel.addEventListener('click', e => {
     case 'pin-project': run(() => api.post(`/api/owner/projects/${d.id}/pin`, { pinned: d.to === 'true' }), d.to === 'true' ? 'Pinned' : 'Unpinned'); break;
     case 'new-gig': editing = { kind: 'gig', id: 'new' }; render(); $('[data-form="gig"] input')?.focus(); break;
     case 'edit-gig': editing = { kind: 'gig', id: Number(d.id) }; render(); break;
+    case 'edit-preorder': editing = { kind: 'preorder', id: Number(d.id) }; render(); break;
     case 'delete-gig': if (confirm(`Delete the ${d.name} gig?`)) run(() => api.del(`/api/owner/gigs/${d.id}`), 'Gig deleted'); break;
     case 'remove-artist': if (confirm(`Stop following ${d.name}? Their found items will disappear.`)) run(() => api.del(`/api/owner/artists/${d.id}`), 'Removed'); break;
     case 'resync': run(async () => { const r = await api.post('/api/owner/artists/resync'); toast(`Music Companion: ${r.added} new artist${r.added === 1 ? '' : 's'} followed, ${r.updated} refreshed`); }); break;
@@ -942,8 +959,10 @@ panel.addEventListener('submit', e => {
     const id = f.dataset.id;
     run(async () => { await (id ? api.put(`/api/owner/gigs/${id}`, body) : api.post('/api/owner/gigs', body)); editing = null; }, 'Gig saved');
   } else if (kind === 'purchase') {
-    const body = { artist: val(f, 'artist'), title: val(f, 'title'), variant: val(f, 'variant'), date: val(f, 'date') || null, image_url: val(f, 'image_url') || null, product_url: val(f, 'product_url') || null };
-    run(async () => { await api.post('/api/owner/vinyl/preorders', body); }, 'Added — see Confirmed Pre-orders on Vinyl radar');
+    const body = { artist: val(f, 'artist'), title: val(f, 'title'), variant: val(f, 'variant'), shop: val(f, 'shop'), date: val(f, 'date') || null, image_url: val(f, 'image_url') || null, product_url: val(f, 'product_url') || null };
+    const id = f.dataset.id;
+    if (id) run(async () => { const r = await api.put(`/api/owner/vinyl/preorders/${id}`, body); editing = null; toast(r.cover === false ? 'Saved — but that cover image couldn’t be fetched, so the old one was kept' : 'Pre-order updated'); });
+    else run(async () => { await api.post('/api/owner/vinyl/preorders', body); }, 'Added — see Confirmed Pre-orders on Vinyl radar');
   } else if (kind === 'artist-add') {
     run(async () => { await api.post('/api/owner/artists', { name: val(f, 'name') }); }, 'Following — checking for new music');
   } else if (kind === 'alerts') {

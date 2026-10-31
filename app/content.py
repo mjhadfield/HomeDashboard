@@ -60,7 +60,10 @@ def purge_junk() -> int:
 
 # Things the *person* set on an item (opened it, voted on it, chose to see a spoiler) rather than the source: a refresh
 # rewrites the rest of `meta` but carries these over, so they're never silently lost while a story is still in its feed.
-STICKY_META = ("read", "vote", "revealed")
+STICKY_META = ("read", "vote", "revealed", "own")
+# A confirmed pre-order corrected by hand (edit_purchase) keeps the owner's version in meta['own']; these are the parts of
+# it that live in `meta` itself — the rest (artist, title, url) are columns, put back after the store's refresh.
+OWN_META = ("variant", "image", "shop")
 
 
 def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baseline: bool) -> int:
@@ -72,9 +75,12 @@ def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baselin
         for it in items:
             exists = con.execute("SELECT meta FROM feed_items WHERE kind = ? AND source = ? AND external_id = ?", (kind, source, it["external_id"])).fetchone()
             meta = dict(it.get("meta") or {})
+            own = None
             if exists:
                 old = json.loads(exists["meta"] or "{}")
                 meta.update({k: old[k] for k in STICKY_META if k in old})
+                if own := old.get("own"):
+                    meta.update({k: own[k] for k in OWN_META if k in own})
             con.execute(
                 "INSERT INTO feed_items (kind, source, external_id, artist, title, subtitle, url, date, meta, status, first_seen, last_seen) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -84,6 +90,9 @@ def upsert_items(kind: str, source: str, items: list[dict[str, Any]], *, baselin
                 (kind, source, it["external_id"], it.get("artist"), it["title"][:300], (it.get("subtitle") or "")[:300], it.get("url"), it.get("date"),
                  json.dumps(meta), "seen" if baseline else "new", now, now),
             )
+            if own:                                      # the owner's correction of a confirmed pre-order beats the store's listing
+                con.execute("UPDATE feed_items SET artist = ?, title = ?, url = ? WHERE kind = ? AND source = ? AND external_id = ?",
+                            (own.get("artist"), own.get("title"), own.get("url"), kind, source, it["external_id"]))
             inserted += 0 if exists else 1
     return inserted
 
@@ -157,7 +166,7 @@ def list_purchased(kind: str) -> list[dict[str, Any]]:
     return _ordered([_row_to_item(r) for r in rows], oldest_first=True)
 
 
-def add_manual_purchase(kind: str, *, artist: str, title: str, variant: str, date: str | None, image: str, url: str | None = None) -> int:
+def add_manual_purchase(kind: str, *, artist: str, title: str, variant: str, date: str | None, image: str, url: str | None = None, shop: str = "") -> int:
     """A record bought somewhere this app doesn't watch, entered by hand — stored the same way as a scraped-then-
     purchased item so Confirmed Pre-orders is one list regardless of where a record came from. Inserted directly
     rather than through upsert_items(), which is shaped for a widget's own fetch cycle, not a one-off owner entry."""
@@ -166,9 +175,27 @@ def add_manual_purchase(kind: str, *, artist: str, title: str, variant: str, dat
         cur = con.execute(
             "INSERT INTO feed_items (kind, source, external_id, artist, title, subtitle, url, date, meta, status, first_seen, last_seen) "
             "VALUES (?, 'manual', ?, ?, ?, '', ?, ?, ?, 'purchased', ?, ?)",
-            (kind, f"manual-{uuid4().hex}", artist[:300], title[:300], url, date, json.dumps({"variant": variant[:120], "image": image}), now, now),
+            (kind, f"manual-{uuid4().hex}", artist[:300], title[:300], url, date, json.dumps({"variant": variant[:120], "image": image, "shop": shop[:60]}), now, now),
         )
     return cur.lastrowid
+
+
+def edit_purchase(item_id: int, *, artist: str, title: str, variant: str, shop: str, url: str | None, image: str | None = None) -> bool:
+    """Correct a confirmed pre-order by hand — e.g. it was ticked off a tracked store's listing but actually bought
+    somewhere else, as a different variant. `image` None keeps the current cover. The correction is also kept in
+    meta['own'], which upsert_items re-applies, so the store's next sync of that listing can't quietly undo it.
+    False if there's no such confirmed pre-order."""
+    with db() as con:
+        row = con.execute("SELECT meta FROM feed_items WHERE id = ? AND status = 'purchased'", (item_id,)).fetchone()
+        if not row:
+            return False
+        meta = json.loads(row["meta"] or "{}")
+        own = {"artist": artist[:300], "title": title[:300], "url": url, "variant": variant[:120], "shop": shop[:60],
+               "image": meta.get("image", "") if image is None else image}
+        meta.update({k: own[k] for k in OWN_META})
+        meta["own"] = own
+        con.execute("UPDATE feed_items SET artist = ?, title = ?, url = ?, meta = ? WHERE id = ?", (own["artist"], own["title"], url, json.dumps(meta), item_id))
+    return True
 
 
 def set_date(item_id: int, date: str | None) -> bool:
@@ -212,6 +239,16 @@ def _ordered(items: list[dict[str, Any]], oldest_first: bool = False) -> list[di
     return by_date([i for i in items if i["status"] == "pinned"]) + by_date([i for i in items if i["status"] != "pinned"])
 
 
+EXCLUSIVE_NOTE = re.compile(r"\s*[\(\[][^()\[\]]*\bexclusive\b[^()\[\]]*[\)\]]\s*$", re.I)
+
+
+def _album_key(it: dict[str, Any]) -> str:
+    """One record across stores: "The Album" and "Album" are the same, and so is a store's own "Album (Metal Injection
+    Exclusive)" — the note stays in the title shown, it just doesn't make a different record."""
+    title = EXCLUSIVE_NOTE.sub("", it["title"]) or it["title"]
+    return f"{norm(it['artist'])}|{norm(re.sub(r'^the\s+', '', title, flags=re.I))}"
+
+
 def list_items(kind: str, *, oldest_first: bool = False, limit: int = 150, dismissed_limit: int = 30, source_priority: tuple[str, ...] = (), keep=None) -> dict[str, Any]:
     """Items to show for a card. Muted artists are hidden (not deleted). Dismissed items come back separately so the
     expanded view can offer to restore them."""
@@ -220,13 +257,15 @@ def list_items(kind: str, *, oldest_first: bool = False, limit: int = 150, dismi
             "SELECT f.* FROM feed_items f LEFT JOIN followed_artists a ON a.name = f.artist COLLATE NOCASE "
             "WHERE f.kind = ? AND (a.status IS NULL OR a.status != 'mute') ORDER BY f.last_seen DESC LIMIT 1500", (kind,)).fetchall()
     items = [_row_to_item(r) for r in rows]
+    bought = {_album_key(i) for i in items if i["status"] == "purchased"}
     items = [i for i in items if not is_junk_artist(i["artist"]) and i["status"] != "purchased" and (keep is None or keep(i))]
 
     if source_priority:                                       # the same album from two sources: keep the preferred one…
+        items = [i for i in items if _album_key(i) not in bought]          # …and none at all once it's been bought, from any of them
         rank = {s: i for i, s in enumerate(source_priority)}
         best: dict[str, dict[str, Any]] = {}
         for it in sorted(items, key=lambda i: rank.get(i["source"], 99)):
-            k = f"{norm(it['artist'])}|{norm(re.sub(r'^the\s+', '', it['title'], flags=re.I))}"      # "The Album" and "Album" are one record
+            k = _album_key(it)
             if k not in best:
                 best[k] = it
                 continue

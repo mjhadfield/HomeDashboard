@@ -47,6 +47,7 @@ DEFAULT_SHOPS = [   # checked against the live stores; order = priority when the
     {"id": "crash-records", "name": "Crash Records", "url": "https://www.crashrecords.co.uk", "collection": "music-pre-orders", "enabled": True},   # GBP; general record shop (not metal-specific), by far the biggest catalogue here
     {"id": "juno", "name": "Juno", "url": "https://www.juno.co.uk", "kind": "juno", "collection": "metal,rock,punk-hardcore", "enabled": True},   # GBP; HTML listing, not Shopify
     {"id": "nesi-media", "name": "Nesi Media", "url": "https://www.nesimedia.com", "kind": "wix", "collection": "", "enabled": True},   # HKD; Hong Kong label (licensed variants); Wix, whole shop — not just pre-orders
+    {"id": "metal-injection", "name": "Metal Injection", "url": "https://store.metalinjection.net", "collection": "preorders", "enabled": True},   # USD; US shop with its own exclusive pressings, reasonable international shipping
     {"id": "nuclear-blast-us", "name": "Nuclear Blast (US)", "url": "https://shop.nuclearblast.com", "collection": "pre-order", "enabled": False},   # mostly the EU catalogue again
 ]
 JUNO_EVERY_HOURS = 24            # a full Juno pass is ~100 polite page requests, so it runs at most this often

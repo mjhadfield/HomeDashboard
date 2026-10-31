@@ -100,6 +100,7 @@ class ManualPreorderIn(BaseModel):
     artist: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=200)
     variant: str = Field("", max_length=120)
+    shop: str = Field("", max_length=60)
     date: str | None = None
     image_url: str | None = Field(None, max_length=500)
     product_url: str | None = Field(None, max_length=500)
@@ -131,9 +132,28 @@ async def add_manual_preorder(body: ManualPreorderIn):
     shows up in Confirmed Pre-orders alongside anything bought straight from a tracked store."""
     image = await vinyl.fetch_manual_cover(body.image_url) if body.image_url else ""
     iid = content.add_manual_purchase("vinyl", artist=body.artist.strip(), title=body.title.strip(),
-                                       variant=body.variant.strip(), date=body.date, image=image, url=body.product_url)
+                                       variant=body.variant.strip(), date=body.date, image=image, url=body.product_url, shop=body.shop.strip())
     notify.widget("vinyl")
     return {"id": iid}
+
+
+@router.put("/vinyl/preorders/{item_id}")
+async def edit_preorder(item_id: int, body: ManualPreorderIn):
+    """Settings → Music → Vinyl pre-orders → Edit: correct a confirmed pre-order, whether it was added by hand or ticked
+    off a tracked store (bought elsewhere in the end, a different variant…). A blank cover address keeps the current
+    cover; a cover that can't be fetched keeps it too, and says so. The release date is only touched if it changed, so
+    re-saving doesn't freeze a store-supplied date as hand-set."""
+    with db.db() as con:
+        row = con.execute("SELECT date FROM feed_items WHERE id = ? AND kind = 'vinyl' AND status = 'purchased'", (item_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "no such confirmed pre-order")
+    image = (await vinyl.fetch_manual_cover(body.image_url) or None) if body.image_url else None
+    content.edit_purchase(item_id, artist=body.artist.strip(), title=body.title.strip(), variant=body.variant.strip(),
+                          shop=body.shop.strip(), url=body.product_url, image=image)
+    if body.date != row["date"]:
+        content.set_date(item_id, body.date)
+    notify.widget("vinyl")
+    return {"ok": True, "cover": image is not None if body.image_url else None}
 
 
 # ---- followed artists ----------------------------------------------------------------------------------------

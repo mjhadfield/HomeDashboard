@@ -428,7 +428,7 @@ def test_add_manual_purchase_and_delete_item():
     iid = content.add_manual_purchase("vinyl", artist="Ghost", title="Skeletá", variant="Ltd. clear vinyl", date="2027-04-01", image="/covers/x.jpg")
     p = content.list_purchased("vinyl")[0]
     assert p["id"] == iid and p["source"] == "manual" and p["status"] == "purchased"
-    assert p["meta"] == {"variant": "Ltd. clear vinyl", "image": "/covers/x.jpg"}
+    assert p["meta"] == {"variant": "Ltd. clear vinyl", "image": "/covers/x.jpg", "shop": ""}
     assert content.delete_item(iid) is True
     assert content.list_purchased("vinyl") == []
     assert content.delete_item(999999) is False
@@ -869,3 +869,13 @@ def test_the_musicbrainz_window_starts_a_month_back_to_the_day():
     rgs = {"release-groups": [{"id": "a", "title": "Edge", "primary-type": "Album", "secondary-types": [], "first-release-date": "2026-08-21"},
                               {"id": "b", "title": "Just out", "primary-type": "Album", "secondary-types": [], "first-release-date": "2026-08-20"}]}
     assert [i["title"] for i in releases.parse_release_groups(rgs, "X", cutoff="2026-08-21", horizon="2027-09-21", types=["Album"])] == ["Edge"]
+
+
+def test_the_same_record_at_another_store_merges_and_disappears_once_bought():
+    content.upsert_items("vinyl", "earache", [{"external_id": "e1", "artist": "Trivium", "title": "Crown In The Grave", "meta": {"shop": "Earache"}}], baseline=True)
+    content.upsert_items("vinyl", "metal-injection", [{"external_id": "m1", "artist": "Trivium", "title": "Crown In The Grave (Metal Injection Exclusive)",
+                                                      "meta": {"shop": "Metal Injection", "format": "2×LP", "price": "$24.98"}}], baseline=True)
+    items = content.list_items("vinyl", source_priority=("earache", "metal-injection"))["items"]
+    assert len(items) == 1 and items[0]["source"] == "earache" and items[0]["meta"]["also"][0]["shop"] == "Metal Injection"
+    content.set_status(items[0]["id"], "purchased")
+    assert content.list_items("vinyl", source_priority=("earache", "metal-injection"))["items"] == []     # bought from one: no longer on the radar from the other

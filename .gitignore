@@ -6,6 +6,7 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
-# local notes (old full README, OpenAI review) - never published
+# local notes (old full README, OpenAI review, CLAUDE.md) - never published
 /AGENTS.md
+/CLAUDE.md
 /docs/
