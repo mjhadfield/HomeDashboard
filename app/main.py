@@ -31,7 +31,8 @@ for _noisy in ("httpx", "httpcore"):
 # live, not guessed. The browser enforces img-src against that final URL, so a wildcard subdomain is the only
 # workable allowlist here, even though every image is only ever *linked* from coverartarchive.org itself.
 # frame-src is Jellyfin (Media page), Music Companion (Companion page), the Music DB Explorer (SQL DB page) and
-# Odysseus (Odysseus page, :7011 — its own framing rules are widened for Citadel by a proxy in ~/Projects/Odysseus) —
+# Odysseus (Odysseus page, :7011 — its own framing rules are widened for Citadel by a proxy in ~/Projects/Odysseus) and
+# Home Improvements (House page, :8670 — its frame-ancestors lists Citadel's origins, config.CITADEL_ORIGINS there) —
 # fixed addresses, hardcoded here the same way the image hosts above are; if any changes in Settings, this needs
 # a matching edit. i.scdn.co is Spotify's artwork CDN (the Music page's player bar). The last seven image hosts are the News
 # page's story pictures (widgets/news.py IMAGE_HOSTS keeps only pictures from these). :8643 (Music Companion's maintenance server) is here too, even though nothing on Citadel's
@@ -41,7 +42,7 @@ for _noisy in ("httpx", "httpcore"):
 CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co "
        "https://ichef.bbci.co.uk https://i.guim.co.uk https://e3.365dm.com https://cdn.arstechnica.net https://www.newscientist.com https://www.quantamagazine.org https://www.sciencenews.org; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644 http://192.168.0.66:7011; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+       "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644 http://192.168.0.66:7011 http://192.168.0.66:8670; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
 
 class NoCacheStatic(StaticFiles):

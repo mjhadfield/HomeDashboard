@@ -141,6 +141,7 @@ function tellFrames() {
   }
   if (sqlSrcSet && sqlOrigin) sqlFrame.contentWindow?.postMessage(look, sqlOrigin);
   if (aiSrcSet && aiOrigin) aiFrame.contentWindow?.postMessage(look, aiOrigin);
+  if (houseSrcSet && houseOrigin) houseFrame.contentWindow?.postMessage(look, houseOrigin);
 }
 musicFrame.addEventListener('load', tellFrames);
 sqlFrame.addEventListener('load', tellFrames);
@@ -169,6 +170,21 @@ function setAiSrc() {
   aiSrcSet = true;
 }
 aiFrame.addEventListener('load', tellFrames);
+
+// And for the House page (Home Improvements, a link). It follows Citadel's theme like Companion, custom colours
+// included (same token names): ?citadel_theme= for the first paint, then the same message.
+const houseFrame = $('#house-frame');
+let houseSrcSet = false, houseOrigin = null;
+function setHouseSrc() {
+  if (houseSrcSet) return;
+  const link = state.links.find(l => l.for_house);
+  if (!link) return;
+  const sep = link.url.includes('?') ? '&' : '?';
+  houseFrame.src = `${link.url}${sep}citadel_theme=${currentTheme()}`;
+  try { houseOrigin = new URL(link.url).origin; } catch { houseOrigin = null; }
+  houseSrcSet = true;
+}
+houseFrame.addEventListener('load', tellFrames);
 
 // The shortcut row across the top (Settings → Widgets → Shortcuts): invisible until something is configured,
 // or when it's switched off there. Links open in a new tab.
@@ -202,6 +218,7 @@ function renderAll() {
   setMusicSrc();
   setSqlSrc();
   setAiSrc();
+  setHouseSrc();
   music.onState(state);
   $('#host-label').textContent = `${state.host} · ${location.hostname}`;
   $('#device-label').textContent = `${state.device.role === 'owner' ? 'Owner' : state.device.role} device`;
@@ -218,12 +235,12 @@ async function pollMonitoring() {
   renderCard('monitoring');
 }
 
-// ---- view router (Home / News / Media / Companion / SQL DB / Music / Odysseus) --------------------------------------------------------------
-const VIEWS = ['home', 'news', 'media', 'music', 'sql', 'listen', 'ai'];
+// ---- view router (Home / News / Media / Companion / SQL DB / Music / Odysseus / House) --------------------------------------------------------------
+const VIEWS = ['home', 'news', 'media', 'music', 'sql', 'listen', 'ai', 'house'];
 // While an embedded page is showing, the phone keyboard shrinks the screen (interactive-widget=resizes-content) rather
 // than sliding over it, so the pinned page (dashboard.css, .main:has(...)) ends just above the keyboard and a chat box
 // at the bottom of it stays visible. Only on those pages: Home, News and Music keep the browser's default.
-const FRAME_VIEWS = ['media', 'music', 'sql', 'ai'];
+const FRAME_VIEWS = ['media', 'music', 'sql', 'ai', 'house'];
 const viewportMeta = $('meta[name="viewport"]');
 const VIEWPORT = viewportMeta.content;
 function route() {
