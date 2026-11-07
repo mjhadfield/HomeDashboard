@@ -40,7 +40,7 @@ for _noisy in ("httpx", "httpcore"):
 # *existing* #music-frame iframe to it, and frame-src also governs subsequent navigations of a nested browsing
 # context, not just its initial src.
 CSP = ("default-src 'self'; img-src 'self' data: https://cdn.shopify.com https://imagescdn.juno.co.uk https://static.wixstatic.com https://coverartarchive.org https://archive.org https://*.archive.org https://i.scdn.co "
-       "https://ichef.bbci.co.uk https://i.guim.co.uk https://e3.365dm.com https://cdn.arstechnica.net https://www.newscientist.com https://www.quantamagazine.org https://www.sciencenews.org; "
+       "https://ichef.bbci.co.uk https://i.guim.co.uk https://e3.365dm.com https://cdn.arstechnica.net https://www.newscientist.com https://www.quantamagazine.org https://www.sciencenews.org https://knowablemagazine.org https://th-thumbnailer.cdn-si-edu.com; "
        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; font-src 'self'; frame-src http://192.168.0.70:8096 http://192.168.0.66:8642 http://192.168.0.66:8643 http://192.168.0.66:8644 http://192.168.0.66:7011 http://192.168.0.66:8670; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 

@@ -37,7 +37,7 @@ TABLOIDS = ("thesun.co.uk", "thesun.ie", "the-sun.com", "dailymail.co.uk", "mail
             "dailystar.co.uk", "mirror.co.uk", "irishmirror.ie", "dailyrecord.co.uk", "metro.co.uk")
 # Story pictures are only kept from hosts the page's CSP allows (main.py); anything else would just be a broken image.
 IMAGE_HOSTS = ("ichef.bbci.co.uk", "i.guim.co.uk", "e3.365dm.com", "cdn.arstechnica.net", "www.newscientist.com", "www.quantamagazine.org",
-               "www.sciencenews.org")
+               "www.sciencenews.org", "knowablemagazine.org", "th-thumbnailer.cdn-si-edu.com")
 
 # What a section leans towards and away from (Settings → News → each section). A story matching "favour" moves up, one
 # matching "play down" sinks; nothing is hidden. A term matches a feed's own category, a whole word or phrase in the
@@ -93,9 +93,14 @@ MUSIC_FEEDS = [
 # Science without the environment: these only cover the sciences, to balance the BBC's "Science & Environment".
 SCIENCE_ONLY = [
     _feed("ars-science", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/science"),
-    _feed("science-news", "Science News", "https://www.sciencenews.org/feed"),
+    _feed("science-news", "Science News", "https://www.sciencenews.org/feed", False),     # paywalled: kept listed, off
     _feed("nasa", "NASA", "https://www.nasa.gov/feed/"),
     _feed("esa-science", "ESA", "https://www.esa.int/rssfeed/Our_Activities/Space_Science"),
+    # Free to read (checked 2026-11-05), to replace the paywalled New Scientist and Science News.
+    _feed("science-aaas", "Science", "https://www.science.org/rss/news_current.xml"),       # the journal's own news desk
+    _feed("aps-physics", "Physics Magazine", "https://feeds.aps.org/rss/recent/physics.xml"),
+    _feed("knowable", "Knowable Magazine", "https://knowablemagazine.org/rss"),
+    _feed("smithsonian-science", "Smithsonian", "https://www.smithsonianmag.com/rss/science-nature/"),
 ]
 DEFAULT_SECTIONS = [
     _section("world", "World", [_feed("bbc-world", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml"),
@@ -110,7 +115,7 @@ DEFAULT_SECTIONS = [
                                     _feed("guardian-tech", "The Guardian", "https://www.theguardian.com/uk/technology/rss"),
                                     _feed("the-verge", "The Verge", "https://www.theverge.com/rss/index.xml", False)]),
     _section("science", "Science", [_feed("bbc-science", "BBC News", "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml"),
-                                    _feed("new-scientist", "New Scientist", "https://www.newscientist.com/feed/home/"),
+                                    _feed("new-scientist", "New Scientist", "https://www.newscientist.com/feed/home/", False),   # paywalled
                                     _feed("guardian-science", "The Guardian", "https://www.theguardian.com/science/rss"),
                                     _feed("quanta", "Quanta Magazine", "https://www.quantamagazine.org/feed/"),
                                     *SCIENCE_ONLY]),
