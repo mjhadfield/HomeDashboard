@@ -1,0 +1,18 @@
+/* Citadel online demo (tools/build_demo.py): the snapshot chip in the header and the "not available" pages. */
+
+.demo-chip { margin-left: 10px; white-space: nowrap; }
+
+/* Media, Odysseus and House keep their (never-loaded) iframes so app.js still finds them; the notice takes their place. */
+.frame-shell[hidden] { display: none !important; }
+.demo-na {
+  flex: 1; height: 100%; min-height: 320px; box-sizing: border-box;
+  display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; padding: 24px 16px;
+  border: 1px solid var(--edge); background: var(--surface); color: var(--silver);
+}
+.demo-na .i { width: 40px; height: 40px; color: var(--accent); opacity: .8; }
+.demo-na b { font-size: 1.15rem; color: var(--silver-hi); letter-spacing: .04em; }
+.demo-na span { max-width: 46ch; color: var(--silver-mute); }
+
+@media (max-width: 700px) {
+  .demo-chip { display: none; }
+}

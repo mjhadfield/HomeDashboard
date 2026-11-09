@@ -87,6 +87,10 @@ It runs as a systemd user service on my PC. The projects it launches run as thei
 
 There are no passwords. A device becomes an "owner" by opening a one-time link printed on the PC's terminal, which needs access to the PC itself. Everything else on the network only gets the guest page.
 
+## Online demo
+
+A frozen, read-only copy runs on [my website](https://www.mikehadfield.co.uk/#/projects/citadel). `tools/build_demo.py` makes it from a copy of the database: it saves what the dashboard, News and Music pages ask the server for and swaps the server for a small script that replays it. Bookmarks, my calendar, gig orders and the pages that only work at home are taken out.
+
 ## Can I run it?
 
 You can, but it's built around my setup. The bins only work for Salford, the Music page reads my Music Companion database, and the addresses of the embedded pages are hard-coded. You're welcome to have a look and borrow bits.
